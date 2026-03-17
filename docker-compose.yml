@@ -1,0 +1,64 @@
+services:
+  # ------------------------------------------------------------------
+  # MediaMTX — lightweight RTSP server
+  # The bridge pushes video here; Frigate connects here to pull it.
+  # ------------------------------------------------------------------
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    ports:
+      # RTSP port — Frigate connects to rtsp://this-host:8554/camera
+      - "8554:8554"
+      # RTMP (optional, useful for debugging with VLC etc.)
+      - "1935:1935"
+      # WebRTC / HLS (optional)
+      - "8888:8888"
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # The bridge itself
+  # ------------------------------------------------------------------
+  reo-bridge:
+    build: .
+    depends_on:
+      - mediamtx
+    environment:
+      # Where uploaded video files appear (mapped via volume below)
+      WATCH_DIR: /watch
+
+      # Push stream to the MediaMTX container
+      RTSP_OUTPUT_URL: rtsp://mediamtx:8554/camera
+
+      # Match your Reolink camera resolution (2K default for most battery cams)
+      STREAM_WIDTH: "2560"
+      STREAM_HEIGHT: "1440"
+      STREAM_FPS: "20"
+
+      # Seconds to wait for a file to stop growing before considering it ready
+      SETTLE_SECONDS: "2.0"
+
+      # Set to "true" to auto-delete files after streaming
+      DELETE_AFTER_STREAM: "false"
+    volumes:
+      - ./watch_dir:/watch
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------
+  # FTP Server — receives uploads from Reolink cameras
+  # Cameras upload clips here; they land in the shared watch volume.
+  # ------------------------------------------------------------------
+  ftp:
+    image: stilliard/pure-ftpd
+    ports:
+      # FTP command port
+      - "21:21"
+      # Passive mode data ports
+      - "30000-30009:30000-30009"
+    environment:
+      PUBLICHOST: "${FTP_PUBLIC_HOST:-localhost}"
+      FTP_USER_NAME: "${FTP_USER:-reolink}"
+      FTP_USER_PASS: "${FTP_PASS:-reolink}"
+      FTP_USER_HOME: /home/ftpuser
+      FTP_PASSIVE_PORTS: "30000:30009"
+    volumes:
+      - ./watch_dir:/home/ftpuser
+    restart: unless-stopped
