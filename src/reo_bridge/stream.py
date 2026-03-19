@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from .config import Config
+from .encoder_params import EncoderParams
 
 log = logging.getLogger(__name__)
 
@@ -28,10 +29,12 @@ def _yuv420p_solid(width: int, height: int, y: int, u: int, v: int) -> bytes:
 class StreamManager:
     """Pipe-fed RTSP stream that seamlessly switches between idle and clip playback."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, encoder_params: EncoderParams) -> None:
         self._config = config
+        self._encoder_params = encoder_params
         self._output_proc: subprocess.Popen | None = None
         self._write_fd: int | None = None
+        self._encoder_version: int = -1  # track which version we're running
 
         w, h = config.stream_width, config.stream_height
 
@@ -46,11 +49,18 @@ class StreamManager:
 
     def start(self) -> None:
         """Start the persistent output FFmpeg pipeline (call once)."""
+        self._start_encoder()
+
+    def _start_encoder(self) -> None:
+        """Start (or restart) the output FFmpeg with current encoder params."""
         read_fd, self._write_fd = os.pipe()
 
         w = self._config.stream_width
         h = self._config.stream_height
         fps = self._config.stream_fps
+
+        encoder_args = self._encoder_params.ffmpeg_args()
+        self._encoder_version = self._encoder_params.version
 
         cmd = [
             "ffmpeg",
@@ -65,14 +75,8 @@ class StreamManager:
             # Silent audio (keeps stream format consistent for Frigate)
             "-f", "lavfi",
             "-i", "anullsrc=r=44100:cl=mono",
-            # Encode
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-tune", "zerolatency",
-            "-b:v", "1500k",
-            "-g", str(fps * 2),
-            "-c:a", "aac",
-            "-b:a", "64k",
+            # Encode (from encoder params)
+            *encoder_args,
             # Output to RTSP
             "-f", "rtsp",
             "-rtsp_transport", "tcp",
@@ -80,13 +84,14 @@ class StreamManager:
         ]
 
         log.info("Starting output pipeline → %s", self._config.rtsp_output_url)
+        log.info("Encoder args: %s", " ".join(encoder_args))
         self._output_proc = subprocess.Popen(
             cmd, stdin=read_fd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         os.close(read_fd)  # only the output FFmpeg needs the read end
 
-    def stop(self) -> None:
-        """Shut down the output pipeline."""
+    def _stop_encoder(self) -> None:
+        """Shut down the current encoder process and close the pipe."""
         if self._output_proc is not None:
             if self._output_proc.poll() is None:
                 self._output_proc.send_signal(signal.SIGINT)
@@ -100,6 +105,25 @@ class StreamManager:
         if self._write_fd is not None:
             os.close(self._write_fd)
             self._write_fd = None
+
+    def stop(self) -> None:
+        """Shut down the output pipeline."""
+        self._stop_encoder()
+
+    def restart(self) -> None:
+        """Restart the encoder pipeline with current encoder params.
+
+        Called when encoder params change via the web UI.
+        Causes a brief stream interruption — acceptable for tuning.
+        """
+        log.info("Restarting encoder pipeline with updated parameters...")
+        self._stop_encoder()
+        self._start_encoder()
+        log.info("Encoder pipeline restarted.")
+
+    def needs_restart(self) -> bool:
+        """Check if encoder params have changed since last start."""
+        return self._encoder_params.version != self._encoder_version
 
     # ------------------------------------------------------------------ #
     #  Idle frames (called from the main loop)

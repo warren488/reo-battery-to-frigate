@@ -61,6 +61,42 @@ Rewrote `stream.py` with a **pipe-based architecture**:
 - [x] Updated `docs/SETUP.md` with Reolink camera FTP configuration instructions
 - [x] Switched from bind mount (`./watch_dir`) to named Docker volume for shared data
 
+## Phase 2.5: Web UI — Stream Tuner — COMPLETE
+
+**Date:** 2026-03-18
+
+### Problem
+
+Finding the right balance between stream quality and performance required manually editing environment variables and rebuilding. No way to experiment with encoder settings in real time.
+
+### Solution
+
+Added a **Flask-based web UI** (port 5000) for live encoder tuning:
+
+- [x] Created `encoder_params.py` — Thread-safe mutable encoder settings (bitrate, CRF, preset, tune, GOP, audio bitrate) with versioning to detect changes
+- [x] Created `web.py` — Flask app with inline HTML/CSS/JS serving a single-page tuner UI
+  - Dark-themed responsive UI with sliders and dropdowns
+  - Toggle between CBR (bitrate) and CRF (quality) rate-control modes
+  - Shows current stream info (resolution, FPS, RTSP URL)
+  - JSON API: `GET/POST /api/encoder`, `GET /api/config`, `GET /api/options`
+  - Input validation with error feedback
+- [x] Updated `stream.py` — `StreamManager` now accepts `EncoderParams`, supports `restart()` and `needs_restart()` for controlled pipeline restarts when settings change
+- [x] Updated `main.py` — Starts web server in a daemon thread; main loop checks for encoder param changes and triggers restarts
+- [x] Added `flask>=3.0` dependency to `pyproject.toml`
+- [x] Exposed port 5000 in `docker-compose.yml` with configurable `WEB_PORT` env var
+
+### Tunable parameters
+
+| Parameter | Range | Default | Notes |
+|-----------|-------|---------|-------|
+| Rate mode | CBR / CRF | CBR | Toggle between constant bitrate and constant quality |
+| Bitrate | 200–10,000 kbps | 1500 kbps | Used in CBR mode |
+| CRF | 0–51 | 23 | Used in CRF mode (lower = better quality) |
+| Preset | ultrafast → veryslow | ultrafast | Speed/quality tradeoff |
+| Tune | zerolatency, film, etc. | zerolatency | Content-type optimization |
+| GOP size | 1–300 frames | fps×2 | Keyframe interval |
+| Audio bitrate | 32–320 kbps | 64 kbps | AAC audio quality |
+
 ### What's next
 
 - [ ] **Phase 3: Testing** — Test end-to-end with real Reolink camera uploads, verify Frigate integration

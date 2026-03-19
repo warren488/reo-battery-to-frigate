@@ -1,11 +1,14 @@
 """Entry point — ties the folder watcher and stream manager together."""
 
 import logging
+import os
 import signal
 
 from .config import Config
+from .encoder_params import EncoderParams
 from .stream import StreamManager
 from .watcher import FolderWatcher
+from .web import start_in_background
 
 log = logging.getLogger(__name__)
 
@@ -18,12 +21,16 @@ def main() -> None:
     )
 
     config = Config()
+    encoder_params = EncoderParams(
+        gop_frames=config.stream_fps * 2,  # default GOP = 2 seconds
+    )
+
     log.info("Config: watch_dir=%s  rtsp=%s  resolution=%dx%d@%dfps",
              config.watch_dir, config.rtsp_output_url,
              config.stream_width, config.stream_height, config.stream_fps)
 
     watcher = FolderWatcher(config)
-    streamer = StreamManager(config)
+    streamer = StreamManager(config, encoder_params)
 
     # Graceful shutdown on SIGINT / SIGTERM
     shutdown = False
@@ -36,6 +43,10 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
+    # Start the web UI
+    web_port = int(os.environ.get("WEB_PORT", "5000"))
+    start_in_background(config, encoder_params, port=web_port)
+
     # Start the persistent pipeline and folder watcher
     watcher.start()
     streamer.start()
@@ -44,6 +55,10 @@ def main() -> None:
 
     try:
         while not shutdown:
+            # Check if encoder params were changed via the web UI
+            if streamer.needs_restart():
+                streamer.restart()
+
             # Check for a new file (non-blocking)
             path = watcher.next_file(timeout=0)
 

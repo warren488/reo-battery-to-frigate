@@ -6,12 +6,13 @@ services:
   mediamtx:
     image: bluenviron/mediamtx:latest
     ports:
-      # RTSP port — Frigate connects to rtsp://this-host:8554/camera
-      - "8554:8554"
+      # RTSP port — Frigate connects to rtsp://this-host:8654/camera
+      # (8554 is avoided — Frigate uses it for its own restreaming)
+      - "8654:8554"
       # RTMP (optional, useful for debugging with VLC etc.)
-      - "1935:1935"
+      - "1945:1935"
       # WebRTC / HLS (optional)
-      - "8888:8888"
+      - "8889:8888"
     restart: unless-stopped
 
   # ------------------------------------------------------------------
@@ -38,6 +39,12 @@ services:
 
       # Set to "true" to auto-delete files after streaming
       DELETE_AFTER_STREAM: "false"
+
+      # Web UI port (for tuning encoder settings)
+      # (5000 is avoided — Frigate uses it for its own web UI)
+      WEB_PORT: "5001"
+    ports:
+      - "5001:5001"
     volumes:
       - ./watch_dir:/watch
     restart: unless-stopped
