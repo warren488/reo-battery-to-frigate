@@ -7,6 +7,7 @@ import signal
 from .config import Config
 from .encoder_params import EncoderParams
 from .stream import StreamManager
+from .streaming_params import StreamingParams
 from .watcher import FolderWatcher
 from .web import start_in_background
 
@@ -24,13 +25,17 @@ def main() -> None:
     encoder_params = EncoderParams(
         gop_frames=config.stream_fps * 2,  # default GOP = 2 seconds
     )
+    streaming_params = StreamingParams(
+        realtime_streaming=config.realtime_streaming,
+        realtime_delay_seconds=config.realtime_delay_seconds,
+    )
 
     log.info("Config: watch_dir=%s  rtsp=%s  resolution=%dx%d@%dfps",
              config.watch_dir, config.rtsp_output_url,
              config.stream_width, config.stream_height, config.stream_fps)
 
-    watcher = FolderWatcher(config)
-    streamer = StreamManager(config, encoder_params)
+    watcher = FolderWatcher(config, streaming_params)
+    streamer = StreamManager(config, encoder_params, streaming_params)
 
     # Graceful shutdown on SIGINT / SIGTERM
     shutdown = False
@@ -45,7 +50,7 @@ def main() -> None:
 
     # Start the web UI
     web_port = int(os.environ.get("WEB_PORT", "5000"))
-    start_in_background(config, encoder_params, port=web_port)
+    start_in_background(config, encoder_params, streaming_params, port=web_port)
 
     # Start the persistent pipeline and folder watcher
     watcher.start()

@@ -9,6 +9,7 @@ from flask import Flask, Response, request
 
 from .config import Config
 from .encoder_params import PRESETS, RATE_MODES, TUNES, EncoderParams
+from .streaming_params import StreamingParams
 
 log = logging.getLogger(__name__)
 
@@ -16,20 +17,22 @@ app = Flask(__name__)
 
 # These are set by init_app() before the server starts
 _encoder_params: EncoderParams | None = None
+_streaming_params: StreamingParams | None = None
 _config: Config | None = None
 
 
-def init_app(config: Config, encoder_params: EncoderParams) -> Flask:
+def init_app(config: Config, encoder_params: EncoderParams, streaming_params: StreamingParams) -> Flask:
     """Wire up shared state and return the Flask app."""
-    global _encoder_params, _config
+    global _encoder_params, _streaming_params, _config
     _encoder_params = encoder_params
+    _streaming_params = streaming_params
     _config = config
     return app
 
 
-def start_in_background(config: Config, encoder_params: EncoderParams, port: int = 5000) -> None:
+def start_in_background(config: Config, encoder_params: EncoderParams, streaming_params: StreamingParams, port: int = 5000) -> None:
     """Start the web server in a daemon thread."""
-    init_app(config, encoder_params)
+    init_app(config, encoder_params, streaming_params)
     thread = threading.Thread(
         target=lambda: app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False),
         daemon=True,
@@ -90,6 +93,29 @@ def get_config():
     }
 
 
+@app.get("/api/streaming")
+def get_streaming():
+    return _streaming_params.snapshot()
+
+
+@app.post("/api/streaming")
+def set_streaming():
+    data = request.get_json(force=True)
+    errors = _validate_streaming(data)
+    if errors:
+        return {"errors": errors}, 400
+
+    updates = {}
+    if "realtime_streaming" in data:
+        updates["realtime_streaming"] = bool(data["realtime_streaming"])
+    if "realtime_delay_seconds" in data:
+        updates["realtime_delay_seconds"] = float(data["realtime_delay_seconds"])
+
+    _streaming_params.update(**updates)
+    log.info("Streaming params updated: %s", updates)
+    return _streaming_params.snapshot()
+
+
 @app.get("/api/options")
 def get_options():
     return {
@@ -97,6 +123,18 @@ def get_options():
         "tunes": TUNES,
         "rate_modes": RATE_MODES,
     }
+
+
+def _validate_streaming(data: dict) -> list[str]:
+    errors = []
+    if "realtime_delay_seconds" in data:
+        try:
+            v = float(data["realtime_delay_seconds"])
+            if not (0 <= v <= 300):
+                errors.append("realtime_delay_seconds must be between 0 and 300")
+        except (ValueError, TypeError):
+            errors.append("realtime_delay_seconds must be a number")
+    return errors
 
 
 def _validate_encoder(data: dict) -> list[str]:
@@ -342,6 +380,52 @@ _INDEX_HTML = """\
   <div class="info-grid" id="info-grid"></div>
 </div>
 
+<!-- Realtime Streaming -->
+<div class="card">
+  <h2>Realtime Streaming <span id="rt-badge" style="font-size:0.75rem;font-weight:400;margin-left:0.5rem;padding:0.15rem 0.5rem;border-radius:999px;background:var(--border);color:var(--muted)">off</span></h2>
+  <div class="section-help">
+    Normally the bridge waits for the full FTP upload to finish before streaming.
+    Enabling this queues the clip after a short delay and attempts to decode it mid-upload.
+    <strong class="warn">Heads up:</strong> standard MP4 files store metadata at the end of the file &mdash;
+    FFmpeg can&rsquo;t decode them until the upload is complete regardless of this setting.
+    Cameras that write <strong>fragmented MP4</strong> or <strong>FLV</strong> will benefit most.
+    Enable this to experiment and check the logs for what happens.
+  </div>
+
+  <div class="field-group">
+    <div class="field">
+      <label>Realtime Mode</label>
+      <div class="toggle-group" id="rt-mode-group">
+        <button data-value="false" class="active">Off</button>
+        <button data-value="true">On</button>
+      </div>
+      <span></span>
+    </div>
+  </div>
+
+  <div class="field-group" id="rt-delay-field">
+    <div class="field">
+      <label>Start Delay</label>
+      <input type="range" id="rt_delay" min="0" max="60" step="0.5">
+      <span class="value" id="rt_delay-val"></span>
+    </div>
+    <div class="help">
+      Seconds to wait after the file is detected before starting the decode.
+      A small buffer (e.g. <strong>5s</strong>) gives FFmpeg something to work with.
+      Set to <strong>0</strong> to queue immediately on detection.
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-primary" id="rt-apply-btn" onclick="applyStreamingSettings()">Apply</button>
+  </div>
+
+  <div class="status-bar" id="rt-status-bar">
+    <div class="dot" id="rt-status-dot"></div>
+    <span id="rt-status-text">Connected</span>
+  </div>
+</div>
+
 <!-- Encoder Settings -->
 <div class="card">
   <h2>Encoder Settings</h2>
@@ -489,22 +573,88 @@ const API = '';
 let options = {};
 let currentEncoder = {};
 
+// -- Realtime streaming --
+function loadStreaming(rt) {
+  setRealtimeMode(rt.realtime_streaming);
+  setSlider('rt_delay', rt.realtime_delay_seconds, v => v + 's');
+}
+
+function setRealtimeMode(enabled) {
+  const btns = document.querySelectorAll('#rt-mode-group button');
+  btns.forEach(b => {
+    const val = b.dataset.value === 'true';
+    b.classList.toggle('active', val === enabled);
+    b.onclick = () => setRealtimeMode(val);
+  });
+  document.getElementById('rt-badge').textContent = enabled ? 'on' : 'off';
+  document.getElementById('rt-badge').style.background = enabled ? 'var(--accent)' : 'var(--border)';
+  document.getElementById('rt-badge').style.color = enabled ? '#fff' : 'var(--muted)';
+  document.getElementById('rt-delay-field').classList.toggle('hidden', !enabled);
+}
+
+function getRealtimeMode() {
+  const active = document.querySelector('#rt-mode-group button.active');
+  return active ? active.dataset.value === 'true' : false;
+}
+
+async function applyStreamingSettings() {
+  const btn = document.getElementById('rt-apply-btn');
+  btn.disabled = true;
+  btn.textContent = 'Applying...';
+  setRtStatus('pending', 'Saving...');
+
+  const payload = {
+    realtime_streaming: getRealtimeMode(),
+    realtime_delay_seconds: parseFloat(document.getElementById('rt_delay').value),
+  };
+
+  try {
+    const res = await fetch(API + '/api/streaming', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setRtStatus('error', 'Error: ' + (data.errors || []).join(', '));
+    } else {
+      loadStreaming(data);
+      setRtStatus('ok', 'Saved — takes effect on next file');
+    }
+  } catch (e) {
+    setRtStatus('error', 'Request failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Apply';
+  }
+}
+
+function setRtStatus(state, text) {
+  const dot = document.getElementById('rt-status-dot');
+  dot.className = 'dot' + (state === 'ok' ? '' : ' ' + state);
+  document.getElementById('rt-status-text').textContent = text;
+}
+
 // -- Init --
 async function init() {
   try {
-    const [optRes, encRes, cfgRes] = await Promise.all([
+    const [optRes, encRes, cfgRes, rtRes] = await Promise.all([
       fetch(API + '/api/options').then(r => r.json()),
       fetch(API + '/api/encoder').then(r => r.json()),
       fetch(API + '/api/config').then(r => r.json()),
+      fetch(API + '/api/streaming').then(r => r.json()),
     ]);
     options = optRes;
     currentEncoder = encRes;
     renderOptions();
     renderConfig(cfgRes);
     loadEncoder(encRes);
+    loadStreaming(rtRes);
     setStatus('ok', 'Connected — version ' + encRes.version);
+    setRtStatus('ok', 'Connected');
   } catch (e) {
     setStatus('error', 'Failed to connect: ' + e.message);
+    setRtStatus('error', 'Failed to connect: ' + e.message);
   }
 }
 

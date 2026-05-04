@@ -102,3 +102,26 @@ Added a **Flask-based web UI** (port 5000) for live encoder tuning:
 - [ ] **Phase 3: Testing** — Test end-to-end with real Reolink camera uploads, verify Frigate integration
 - [ ] **Phase 4: Multi-camera support** — Support multiple Reolink cameras with separate streams
 - [ ] **Phase 5: Hardening** — Error recovery, logging improvements, health checks
+
+## Phase 2.6: Realtime Streaming Toggle (Experimental) — COMPLETE
+
+**Date:** 2026-05-01
+
+### Problem
+
+With the default settle-based flow, streaming doesn't begin until the entire FTP upload finishes plus the settle delay. For users who want to observe stream latency or experiment with partial-file decoding, there was no way to try starting the stream mid-upload.
+
+### Solution
+
+Added an experimental `REALTIME_STREAMING` toggle (default `false`):
+
+- [x] `config.py` — Added `realtime_streaming: bool` and `realtime_delay_seconds: float` (default 5.0s)
+- [x] `watcher.py` — When realtime mode is on, `_wait_delay_and_enqueue` queues the file after a fixed delay instead of waiting for size to stabilise
+- [x] `stream.py` — Refactored `stream_file` into `_decode_from_offset(path, offset_seconds) -> int` (core decoder) and `_stream_file_realtime` (resume loop). In realtime mode, after FFmpeg exits the resume loop re-runs the decoder from the last offset if the file has grown.
+- [x] `docker-compose.yml` — Documented new env vars as comments
+
+### Known limitations
+
+- **Standard MP4 (moov at EOF)** — FFmpeg cannot decode frames until the `moov` atom is written (at the end of the file). Realtime mode will show idle frames until the upload completes, then decode the full clip from offset 0. Cameras writing **fragmented MP4** or **FLV** clips will benefit most.
+- **Keyframe alignment on resume** — The `-ss` seek used for resume aligns to the nearest keyframe, so a few frames around the resume boundary may be dropped or duplicated.
+- **Busy-wait on empty decode** — If no frames are decoded (moov not yet available), the resume loop retries every 0.5s until the file stops growing.

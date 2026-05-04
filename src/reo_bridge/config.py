@@ -33,3 +33,13 @@ class Config:
     delete_after_stream: bool = os.environ.get(
         "DELETE_AFTER_STREAM", "false"
     ).lower() in ("true", "1", "yes")
+
+    # Experimental: queue files after a short fixed delay instead of waiting for
+    # the full upload to finish. FFmpeg may hit EOF early for standard MP4s
+    # (moov atom is typically at EOF; fragmented/FLV formats work best).
+    realtime_streaming: bool = os.environ.get(
+        "REALTIME_STREAMING", "false"
+    ).lower() in ("true", "1", "yes")
+
+    # Seconds to wait after file creation before queueing in realtime mode.
+    realtime_delay_seconds: float = float(os.environ.get("REALTIME_DELAY_SECONDS", "5.0"))

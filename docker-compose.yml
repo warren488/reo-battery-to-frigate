@@ -40,6 +40,12 @@ services:
       # Set to "true" to auto-delete files after streaming
       DELETE_AFTER_STREAM: "false"
 
+      # Experimental: start streaming before the upload finishes.
+      # Works best with fragmented MP4 or FLV; standard MP4 (moov at EOF) may
+      # show no frames until the full upload completes regardless.
+      # REALTIME_STREAMING: "false"
+      # REALTIME_DELAY_SECONDS: "5.0"
+
       # Web UI port (for tuning encoder settings)
       # (5000 is avoided — Frigate uses it for its own web UI)
       WEB_PORT: "5001"

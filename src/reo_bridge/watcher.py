@@ -10,6 +10,7 @@ from watchdog.events import FileCreatedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from .config import Config
+from .streaming_params import StreamingParams
 
 log = logging.getLogger(__name__)
 
@@ -17,9 +18,10 @@ log = logging.getLogger(__name__)
 class _VideoFileHandler(FileSystemEventHandler):
     """Enqueues newly created video files after they finish writing."""
 
-    def __init__(self, config: Config, file_queue: queue.Queue[Path]) -> None:
+    def __init__(self, config: Config, file_queue: queue.Queue[Path], streaming_params: StreamingParams) -> None:
         self._config = config
         self._queue = file_queue
+        self._streaming_params = streaming_params
 
     def on_created(self, event: FileCreatedEvent) -> None:
         if event.is_directory:
@@ -29,12 +31,17 @@ class _VideoFileHandler(FileSystemEventHandler):
         if path.suffix.lower() not in self._config.video_extensions:
             return
 
-        log.info("Detected new file: %s — waiting for write to settle", path.name)
-
-        # Wait for the file to stop growing (FTP upload may still be in progress)
-        threading.Thread(
-            target=self._wait_and_enqueue, args=(path,), daemon=True
-        ).start()
+        if self._streaming_params.realtime_streaming:
+            log.info("Detected new file: %s — realtime mode, queueing after %.1fs delay",
+                     path.name, self._streaming_params.realtime_delay_seconds)
+            threading.Thread(
+                target=self._wait_delay_and_enqueue, args=(path,), daemon=True
+            ).start()
+        else:
+            log.info("Detected new file: %s — waiting for write to settle", path.name)
+            threading.Thread(
+                target=self._wait_and_enqueue, args=(path,), daemon=True
+            ).start()
 
     def _wait_and_enqueue(self, path: Path) -> None:
         """Poll file size until it stabilises, then add to queue."""
@@ -54,19 +61,31 @@ class _VideoFileHandler(FileSystemEventHandler):
         log.info("File ready: %s (%d bytes)", path.name, prev_size)
         self._queue.put(path)
 
+    def _wait_delay_and_enqueue(self, path: Path) -> None:
+        """Realtime mode: wait a fixed delay, then queue regardless of upload state."""
+        time.sleep(self._streaming_params.realtime_delay_seconds)
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            log.warning("File disappeared before realtime queue: %s", path.name)
+            return
+        log.info("Realtime: queueing %s (%d bytes, upload may still be in progress)", path.name, size)
+        self._queue.put(path)
+
 
 class FolderWatcher:
     """Monitors a directory and yields video file paths as they arrive."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, streaming_params: StreamingParams) -> None:
         self._config = config
+        self._streaming_params = streaming_params
         self._queue: queue.Queue[Path] = queue.Queue()
         self._observer = Observer()
 
     def start(self) -> None:
         watch_path = self._config.watch_dir
         watch_path.mkdir(parents=True, exist_ok=True)
-        handler = _VideoFileHandler(self._config, self._queue)
+        handler = _VideoFileHandler(self._config, self._queue, self._streaming_params)
         self._observer.schedule(handler, str(watch_path), recursive=True)
         self._observer.start()
         log.info("Watching %s for new video files", watch_path)

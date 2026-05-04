@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .config import Config
 from .encoder_params import EncoderParams
+from .streaming_params import StreamingParams
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +30,10 @@ def _yuv420p_solid(width: int, height: int, y: int, u: int, v: int) -> bytes:
 class StreamManager:
     """Pipe-fed RTSP stream that seamlessly switches between idle and clip playback."""
 
-    def __init__(self, config: Config, encoder_params: EncoderParams) -> None:
+    def __init__(self, config: Config, encoder_params: EncoderParams, streaming_params: StreamingParams) -> None:
         self._config = config
         self._encoder_params = encoder_params
+        self._streaming_params = streaming_params
         self._output_proc: subprocess.Popen | None = None
         self._write_fd: int | None = None
         self._encoder_version: int = -1  # track which version we're running
@@ -146,15 +148,27 @@ class StreamManager:
 
     def stream_file(self, path: Path) -> None:
         """Decode a clip and feed its frames into the persistent pipe."""
+        log.info("Streaming file: %s", path.name)
+        if self._streaming_params.realtime_streaming:
+            self._stream_file_realtime(path)
+        else:
+            frames = self._decode_from_offset(path, 0.0)
+            log.info("Finished streaming: %s (%d frames)", path.name, frames)
+
+    def _decode_from_offset(self, path: Path, offset_seconds: float) -> int:
+        """Run the decoder from offset_seconds; return number of complete frames decoded."""
         w = self._config.stream_width
         h = self._config.stream_height
         fps = self._config.stream_fps
+
+        seek_args = [] if offset_seconds == 0.0 else ["-ss", f"{offset_seconds:.3f}"]
 
         cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "warning",
-            "-re",  # play at native speed
+            "-re",
+            *seek_args,
             "-i", str(path),
             "-vf", (
                 f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
@@ -167,25 +181,54 @@ class StreamManager:
             "pipe:1",
         ]
 
-        log.info("Streaming file: %s", path.name)
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE
         )
 
-        # Read complete frames from the decoder and write them to the pipe
+        frames = 0
         while True:
             data = proc.stdout.read(self._frame_size)
             if len(data) < self._frame_size:
-                break  # EOF or partial frame at the end — discard
+                break
             self._write_to_pipe(data)
+            frames += 1
 
         proc.wait()
 
         stderr_out = proc.stderr.read().decode(errors="replace").strip()
         if proc.returncode != 0 and stderr_out:
-            log.error("FFmpeg exited %d for %s: %s", proc.returncode, path.name, stderr_out)
-        else:
-            log.info("Finished streaming: %s", path.name)
+            log.warning("Decoder exited %d for %s: %s", proc.returncode, path.name, stderr_out)
+
+        return frames
+
+    def _stream_file_realtime(self, path: Path) -> None:
+        """Realtime mode: decode, then resume if the file grew while decoding."""
+        offset_seconds = 0.0
+        size_before = 0
+
+        while True:
+            frames = self._decode_from_offset(path, offset_seconds)
+
+            try:
+                size_after = path.stat().st_size
+            except FileNotFoundError:
+                break
+
+            if size_after <= size_before:
+                break  # file has not grown — nothing more to decode
+
+            if frames == 0:
+                # No frames yet (e.g. moov atom not written) — wait before retrying
+                log.debug("Realtime: no frames decoded for %s yet, waiting for more data", path.name)
+                time.sleep(0.5)
+            else:
+                offset_seconds += frames / self._config.stream_fps
+                log.info("Realtime: file grew to %d bytes, resuming %s from %.1fs",
+                         size_after, path.name, offset_seconds)
+
+            size_before = size_after
+
+        log.info("Finished realtime streaming: %s", path.name)
 
     # ------------------------------------------------------------------ #
     #  Internals
