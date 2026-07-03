@@ -202,3 +202,28 @@ blocking during motion — see `docs/EFFICIENCY_REPORT.md` Part 1):
   load), `PARAMS_FILE` config (default `/data/params.json`), saved on every web-UI
   apply, restored at startup; `./data:/data` volume added to compose
 - [x] README parameter tables re-synced (defaults, persistence, `PARAMS_FILE`)
+
+## Phase 3 — Checkpoint 3: Robustness — COMPLETE
+
+**Date:** 2026-07-03
+
+Implements `docs/REMEDIATION_PLAN.md` Phase 2 plus new audit findings §6.1–6.3:
+
+- [x] **Decoder stderr deadlock fixed** (`stream.py`): stderr drained on a background
+  thread (capped at 50 lines) instead of read-after-wait — a chatty decode of a
+  corrupt/partial file can no longer stall the whole bridge
+- [x] **Encoder supervision**: output FFmpeg stderr now logged (`encoder:` prefix);
+  `_write_to_pipe` survives `BrokenPipeError` and flags the encoder dead instead of
+  crashing the main loop; main loop self-heals with a 5-second restart backoff
+- [x] **Idle pacing drift fixed**: absolute-deadline scheduling with a resync guard
+  after startup/clips/stalls — stream latency no longer grows with uptime
+- [x] **Watcher handles renames** (`on_moved`): uploads that arrive as
+  temp-name-then-rename are no longer silently ignored; 60-second dedupe guard
+  prevents double-queueing on create-then-rename sequences
+- [x] **Graceful shutdown mid-clip**: SIGTERM/SIGINT now aborts an in-flight decode
+  promptly (shared shutdown event), so `docker stop` completes within its grace period
+- [x] **Config validation** (`config.py`): env vars read at construction time (was
+  import time — testability), errors name the offending variable, dimensions must be
+  even (YUV420P), FPS positive
+- [x] Verified via failure drills: truncated MP4, encoder process kill, MediaMTX
+  restart mid-stream, `mv` into watch dir, `docker stop` during clip, invalid config

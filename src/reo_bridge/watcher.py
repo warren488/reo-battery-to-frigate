@@ -6,7 +6,7 @@ import threading
 import time
 from pathlib import Path
 
-from watchdog.events import FileCreatedEvent, FileSystemEventHandler
+from watchdog.events import FileCreatedEvent, FileMovedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from .config import Config
@@ -22,14 +22,36 @@ class _VideoFileHandler(FileSystemEventHandler):
         self._config = config
         self._queue = file_queue
         self._streaming_params = streaming_params
+        # Guard against double-queueing when an upload arrives as a create
+        # followed by a rename (path → queued-at monotonic time)
+        self._recently_seen: dict[Path, float] = {}
+        self._seen_lock = threading.Lock()
 
     def on_created(self, event: FileCreatedEvent) -> None:
         if event.is_directory:
             return
+        self._handle_new_file(Path(str(event.src_path)))
 
-        path = Path(event.src_path)
+    def on_moved(self, event: FileMovedEvent) -> None:
+        # Some FTP servers/cameras upload to a temp name and rename into
+        # place; that arrives as a move, not a create.
+        if event.is_directory:
+            return
+        self._handle_new_file(Path(str(event.dest_path)))
+
+    def _handle_new_file(self, path: Path) -> None:
         if path.suffix.lower() not in self._config.video_extensions:
             return
+
+        with self._seen_lock:
+            now = time.monotonic()
+            self._recently_seen = {
+                p: t for p, t in self._recently_seen.items() if now - t < 60.0
+            }
+            if path in self._recently_seen:
+                log.debug("Ignoring duplicate event for %s", path.name)
+                return
+            self._recently_seen[path] = now
 
         if self._streaming_params.realtime_streaming:
             log.info("Detected new file: %s — realtime mode, queueing after %.1fs delay",

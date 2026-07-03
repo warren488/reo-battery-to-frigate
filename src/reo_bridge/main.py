@@ -3,6 +3,8 @@
 import logging
 import os
 import signal
+import threading
+import time
 
 from .config import Config
 from .encoder_params import EncoderParams
@@ -22,7 +24,12 @@ def main() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    config = Config()
+    try:
+        config = Config()
+    except ValueError as e:
+        log.error("Invalid configuration: %s", e)
+        raise SystemExit(1) from None
+
     encoder_params = EncoderParams(
         gop_frames=config.stream_fps * 2,  # default GOP = 2 seconds
     )
@@ -49,16 +56,17 @@ def main() -> None:
              config.watch_dir, config.rtsp_output_url,
              config.stream_width, config.stream_height, config.stream_fps)
 
-    watcher = FolderWatcher(config, streaming_params)
-    streamer = StreamManager(config, encoder_params, streaming_params)
+    # Graceful shutdown on SIGINT / SIGTERM. The event is shared with the
+    # StreamManager so an in-flight clip is abandoned promptly instead of
+    # playing out past Docker's stop grace period.
+    shutdown = threading.Event()
 
-    # Graceful shutdown on SIGINT / SIGTERM
-    shutdown = False
+    watcher = FolderWatcher(config, streaming_params)
+    streamer = StreamManager(config, encoder_params, streaming_params, shutdown_event=shutdown)
 
     def _handle_signal(signum, _frame):
-        nonlocal shutdown
         log.info("Received signal %s — shutting down", signal.Signals(signum).name)
-        shutdown = True
+        shutdown.set()
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -73,11 +81,24 @@ def main() -> None:
 
     log.info("Bridge is running. Waiting for video files in %s ...", config.watch_dir)
 
+    last_heal = 0.0
+
     try:
-        while not shutdown:
+        while not shutdown.is_set():
             # Check if encoder params were changed via the web UI
             if streamer.needs_restart():
                 streamer.restart()
+            elif streamer.encoder_dead():
+                # Self-heal, with backoff so a persistently unreachable RTSP
+                # target doesn't busy-loop restarts
+                now = time.monotonic()
+                if now - last_heal >= 5.0:
+                    last_heal = now
+                    log.warning("Output encoder died — restarting pipeline")
+                    streamer.restart()
+                else:
+                    time.sleep(0.25)
+                    continue
 
             # Check for a new file (non-blocking)
             path = watcher.next_file(timeout=0)
