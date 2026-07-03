@@ -6,8 +6,7 @@ new settings.
 """
 
 import threading
-from dataclasses import dataclass, field
-
+from dataclasses import dataclass
 
 # Valid x264 presets (fastest → slowest)
 PRESETS = [

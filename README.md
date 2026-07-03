@@ -1,5 +1,8 @@
 # Reo Bridge — Battery Camera to Frigate
 
+[![CI](https://github.com/warren488/reolink-battery-frigate-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/warren488/reolink-battery-frigate-bridge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A bridge that turns Reolink battery camera motion clips into a continuous RTSP stream for [Frigate NVR](https://frigate.video/).
 
 **The problem:** Frigate expects always-on RTSP streams. Battery cameras can't do that — they sleep to save power and only wake on motion, uploading short clips via FTP.

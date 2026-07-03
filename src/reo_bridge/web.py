@@ -1,9 +1,7 @@
 """Web UI for tuning encoder parameters and viewing bridge status."""
 
-import json
 import logging
 import threading
-from pathlib import Path
 
 from flask import Flask, Response, request
 

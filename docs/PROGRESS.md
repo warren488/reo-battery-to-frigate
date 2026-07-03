@@ -246,3 +246,31 @@ Implements `docs/REMEDIATION_PLAN.md` Phase 3 plus audit §5:
   (publishes no version tags)
 - [x] CPU before/after measured with `docker stats` (idle + during clip); clip
   playback re-verified frame-exact after the buffer change
+
+## Phase 3 — Checkpoint 5: Tests & CI — COMPLETE
+
+**Date:** 2026-07-03
+
+First test suite and continuous integration for the project:
+
+- [x] **45 tests** across six files in `tests/`:
+  - `test_config.py` — env parsing, validation (named-variable errors, even
+    dimensions, positive fps)
+  - `test_encoder_params.py` — FFmpeg args per rate mode (VBV always present, no
+    `-tune` for "none"), version bumping, unknown-key rejection
+  - `test_persistence.py` — round-trip, corrupt/missing/unwritable files fail soft,
+    atomic writes leave no temp files
+  - `test_web.py` — all API endpoints via Flask test client: reads, updates,
+    validation rejections, persistence wiring
+  - `test_watcher.py` — settle detection (incl. a still-growing file), suffix
+    filtering, create+rename dedupe, vanished files
+  - `test_stream_decode.py` — integration (needs ffmpeg): real decoder run must
+    deliver byte-exact whole frames to the pipe — the architecture's core invariant;
+    garbage input must yield 0 frames
+- [x] **ruff** configured in `pyproject.toml` (defaults + import sorting, bugbear,
+  pyupgrade); existing violations fixed
+- [x] `dev` extra (`pip install -e ".[dev]"`) with pytest + ruff
+- [x] **GitHub Actions** (`.github/workflows/ci.yml`): lint, pytest on 3.11 + 3.12
+  (with ffmpeg for integration tests), docker build
+- [x] CI + license badges in README
+- [x] Full suite verified green both on the host venv and inside the built container
