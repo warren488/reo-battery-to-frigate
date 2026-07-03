@@ -1,16 +1,36 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reo-batter-to-frigate"
+name = "reolink-battery-frigate-bridge"
 version = "0.1.0"
 description = "Bridge between Reolink battery cameras (FTP uploads) and Frigate NVR (continuous RTSP stream)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "warren488" },
+]
+keywords = ["reolink", "frigate", "rtsp", "nvr", "battery-camera", "ftp", "ffmpeg"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Home Automation",
+]
 requires-python = ">=3.11"
 dependencies = [
     "watchdog>=4.0",
     "flask>=3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/warren488/reolink-battery-frigate-bridge"
+Issues = "https://github.com/warren488/reolink-battery-frigate-bridge/issues"
 
 [project.scripts]
 reo-bridge = "reo_bridge.main:main"

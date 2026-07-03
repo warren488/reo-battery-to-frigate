@@ -26,8 +26,8 @@ The output FFmpeg never restarts, so the RTSP connection stays up through all tr
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/your-user/reo-batter-to-frigate.git
-cd reo-batter-to-frigate
+git clone https://github.com/warren488/reolink-battery-frigate-bridge.git
+cd reolink-battery-frigate-bridge
 
 cp .env.example .env
 ```
@@ -115,8 +115,10 @@ All settings are controlled via environment variables in `docker-compose.yml`:
 | `STREAM_FPS` | `20` | Output stream frame rate |
 | `SETTLE_SECONDS` | `2.0` | Seconds to wait for a file to stop growing before streaming |
 | `DELETE_AFTER_STREAM` | `false` | Remove clip files after they've been played |
-| `RTSP_OUTPUT_URL` | `rtsp://mediamtx:8554/camera` | Internal RTSP push target |
+| `RTSP_OUTPUT_URL` | `rtsp://mediamtx:8554/camera`¹ | Internal RTSP push target |
 | `WEB_PORT` | `5001` | Web UI port |
+
+¹ Value set in `docker-compose.yml`. The application's built-in default is `rtsp://localhost:8554/camera` (for running outside Docker).
 
 FTP settings are in `.env`:
 
@@ -154,6 +156,7 @@ curl -T video.mp4 ftp://reolink:reolink@localhost/
 src/reo_bridge/
 ├── config.py          # Settings via environment variables
 ├── encoder_params.py  # Mutable encoder settings (for web UI)
+├── streaming_params.py # Mutable streaming settings (realtime mode)
 ├── main.py            # Entry point + main event loop
 ├── stream.py          # Pipe-based FFmpeg pipeline
 ├── watcher.py         # Folder monitoring (inotify)

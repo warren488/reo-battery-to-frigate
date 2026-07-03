@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A bridge between Reolink battery cameras and Frigate NVR. Battery cameras upload motion clips via FTP to a watched folder. This app presents those clips as a continuous RTSP stream that Frigate can consume. When idle, the stream shows alternating blue/red frames; when a clip arrives, it seamlessly plays through the same stream.
+A bridge between Reolink battery cameras and Frigate NVR. Battery cameras upload motion clips via FTP to a watched folder. This app presents those clips as a continuous RTSP stream that Frigate can consume. When idle, the stream shows solid black frames; when a clip arrives, it seamlessly plays through the same stream.
 
 ## Architecture
 
@@ -25,16 +25,22 @@ The RTSP connection never drops during transitions. See `docs/ARCHITECTURE.md` f
 
 ```
 src/reo_bridge/
-├── config.py     # All settings via env vars (Config dataclass)
-├── main.py       # Entry point + main event loop
-├── stream.py     # Pipe-based FFmpeg pipeline (StreamManager)
-└── watcher.py    # Folder monitoring (FolderWatcher)
+├── config.py            # All settings via env vars (Config dataclass)
+├── encoder_params.py    # Thread-safe mutable encoder settings (tuned via web UI)
+├── streaming_params.py  # Thread-safe mutable streaming settings (realtime mode)
+├── main.py              # Entry point + main event loop
+├── stream.py            # Pipe-based FFmpeg pipeline (StreamManager)
+├── watcher.py           # Folder monitoring (FolderWatcher)
+└── web.py               # Flask web UI + JSON API for live tuning
 scripts/
-└── test-upload.sh  # Generates a test clip into watch_dir/
+└── test-upload.sh  # Generates a test clip and uploads it via FTP
 docs/
-├── ARCHITECTURE.md # Detailed architecture with diagrams
-├── PROGRESS.md     # Phase-by-phase progress tracker
-└── SETUP.md        # End-user setup instructions
+├── ARCHITECTURE.md          # Detailed architecture with diagrams
+├── PROGRESS.md              # Phase-by-phase progress tracker
+├── SETUP.md                 # End-user setup instructions
+├── EFFICIENCY_REPORT.md     # 2026-06-11 efficiency/quality review
+├── REMEDIATION_PLAN.md      # Step-by-step fixes for the review findings
+└── OSS_READINESS_AUDIT.md   # 2026-07-03 pre-publication audit
 ```
 
 ## Key Files

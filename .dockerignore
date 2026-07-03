@@ -1,0 +1,18 @@
+# Keep camera footage, secrets, and repo metadata out of the build context
+watch_dir/
+.git/
+.env
+.env.*
+!.env.example
+docs/
+.claude/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+.idea/
+.vscode/
+.DS_Store

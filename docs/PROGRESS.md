@@ -41,7 +41,7 @@ The original design used separate FFmpeg processes for idle and clip streaming, 
 Rewrote `stream.py` with a **pipe-based architecture**:
 
 - [x] Single persistent output FFmpeg reads raw YUV420P from an OS pipe → encodes to H264 → pushes RTSP. Never restarts.
-- [x] Idle mode: Python writes pre-generated blue/red frames directly to the pipe at target FPS
+- [x] Idle mode: Python writes a pre-generated solid black frame directly to the pipe at target FPS
 - [x] Clip mode: temporary decoder FFmpeg outputs raw frames → Python reads exact frame-sized chunks → writes to pipe
 - [x] No stream interruption during idle↔clip transitions
 - [x] Updated `main.py` to a tight event loop (check for file → write idle frame → repeat)
@@ -54,12 +54,11 @@ Rewrote `stream.py` with a **pipe-based architecture**:
 ### What was done
 
 - [x] Added **Pure-FTPd** container to `docker-compose.yml`
-- [x] FTP server and reo-bridge share a named Docker volume (`watch_data`) — uploads land directly in the watched directory
+- [x] FTP server and reo-bridge share the `./watch_dir` bind mount — uploads land directly in the watched directory
 - [x] FTP credentials configurable via `.env` file (`FTP_USER`, `FTP_PASS`, `FTP_PUBLIC_HOST`)
 - [x] Passive mode ports exposed (30000-30009) for NAT/firewall compatibility
 - [x] Created `.env.example` with documented defaults
 - [x] Updated `docs/SETUP.md` with Reolink camera FTP configuration instructions
-- [x] Switched from bind mount (`./watch_dir`) to named Docker volume for shared data
 
 ## Phase 2.5: Web UI — Stream Tuner — COMPLETE
 
@@ -125,3 +124,44 @@ Added an experimental `REALTIME_STREAMING` toggle (default `false`):
 - **Standard MP4 (moov at EOF)** — FFmpeg cannot decode frames until the `moov` atom is written (at the end of the file). Realtime mode will show idle frames until the upload completes, then decode the full clip from offset 0. Cameras writing **fragmented MP4** or **FLV** clips will benefit most.
 - **Keyframe alignment on resume** — The `-ss` seek used for resume aligns to the nearest keyframe, so a few frames around the resume boundary may be dropped or duplicated.
 - **Busy-wait on empty decode** — If no frames are decoded (moov not yet available), the resume loop retries every 0.5s until the file stops growing.
+
+## Review: Efficiency & Artifacting Report — COMPLETE
+
+**Date:** 2026-06-11
+
+Full-project efficiency review plus diagnosis of the bottom-of-frame motion artifacting.
+See `docs/EFFICIENCY_REPORT.md`. Headline findings:
+
+- Artifacting root cause: default 1500 kbps "CBR" (actually ABR — no VBV) at 1440p20
+  with `ultrafast` + `zerolatency` starves the encoder during motion; bottom rows get
+  crushed quantization. Recommended: 4000–6000 kbps, add `-maxrate`/`-bufsize`, drop
+  `zerolatency`.
+- Robustness: decoder stderr can deadlock the bridge; encoder death is invisible and
+  crashes the main loop; idle pacing drifts (latency grows with uptime).
+- No code changes made yet — report only.
+- Follow-up: full remediation plan written at `docs/REMEDIATION_PLAN.md` (4 phases:
+  stream quality → robustness → performance → housekeeping, with verification gates).
+
+## Review: OSS Readiness Audit — COMPLETE
+
+**Date:** 2026-07-03
+
+Full-repo audit ahead of publishing publicly, covering everything the 2026-06-11
+efficiency review didn't: licensing, naming, security posture, Docker/build hygiene,
+code quality, testing/CI, documentation accuracy, and web UI/UX. See
+`docs/OSS_READINESS_AUDIT.md`. Headline findings:
+
+- **Publish blockers:** no LICENSE file; "batter" typo in the repo/package name; real
+  LAN IP committed in `.env.example`; no `.dockerignore` (695 MB of personal footage
+  in every build context); encoder defaults still produce artifacting (June Phase 1
+  unapplied).
+- **All findings from the 2026-06-11 efficiency report verified still open** — no
+  remediation has landed yet.
+- New findings: SETUP.md points Frigate at the wrong port (8554 vs 8654), `Config`
+  reads env at import time (blocks testability), `.jpg` uploads never cleaned up,
+  shutdown blocks on in-flight clips, unpinned Docker images, unauthenticated web UI
+  published on all interfaces, zero tests/CI.
+- UI recommendations: `/api/status` + status card, embed MediaMTX's built-in live
+  player (port 8889) for closed-loop tuning, persistence warning.
+- No code changes made — audit only. Prioritized launch checklist at the end of the
+  audit doc.

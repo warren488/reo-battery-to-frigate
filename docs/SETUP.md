@@ -1,5 +1,8 @@
 # Setup Guide
 
+> The [README](../README.md) has the condensed quick start. This guide covers the same
+> steps with more detail plus verification and troubleshooting.
+
 ## Prerequisites
 
 - Docker and Docker Compose
@@ -46,8 +49,8 @@ docker compose up -d --build
 
 This starts three services:
 - **ftp** — FTP server on port 21 (receives uploads from cameras)
-- **mediamtx** — RTSP server on port 8554 (serves the stream to Frigate)
-- **reo-bridge** — the bridge (watches for uploads, feeds the stream)
+- **mediamtx** — RTSP server on host port **8654** (serves the stream to Frigate; 8554 is avoided because Frigate uses it for its own restreaming)
+- **reo-bridge** — the bridge (watches for uploads, feeds the stream; web UI on port 5001)
 
 ### 4. Configure your Reolink camera
 
@@ -71,7 +74,7 @@ cameras:
   reolink_battery:
     ffmpeg:
       inputs:
-        - path: rtsp://<bridge-host>:8554/camera
+        - path: rtsp://<bridge-host>:8654/camera
           roles:
             - detect
             - record
@@ -87,9 +90,9 @@ Replace `<bridge-host>` with the IP/hostname of the machine running this bridge.
 
 ### Check the stream with VLC
 
-Open VLC and play: `rtsp://<bridge-host>:8554/camera`
+Open VLC and play: `rtsp://<bridge-host>:8654/camera`
 
-You should see alternating blue/red frames. Drop a `.mp4` file into the FTP server (or use the test script) and it should play through the stream.
+You should see a solid black frame (the idle stream). Drop a `.mp4` file into the FTP server (or use the test script) and it should play through the stream.
 
 ### Test with a sample clip
 

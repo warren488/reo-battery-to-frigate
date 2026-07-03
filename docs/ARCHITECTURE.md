@@ -71,7 +71,7 @@ The solution is a **single persistent FFmpeg process** that never restarts:
 
 1. **On startup**, an OS pipe is created. One persistent FFmpeg reads raw video from the read end and encodes H264 + silent AAC to RTSP. This process runs for the entire lifetime of the bridge.
 
-2. **When idle**, the Python main loop writes pre-generated solid-colour YUV420P frames (alternating blue/red) directly to the pipe's write end at the target FPS.
+2. **When idle**, the Python main loop writes a pre-generated solid black YUV420P frame directly to the pipe's write end at the target FPS.
 
 3. **When a clip arrives**, the main loop stops writing idle frames and spawns a temporary FFmpeg to decode the clip to raw YUV420P. Python reads complete frames from the decoder's stdout and writes them to the pipe. The output FFmpeg sees a seamless stream of frames — it has no idea the source changed.
 
@@ -89,7 +89,7 @@ The solution is a **single persistent FFmpeg process** that never restarts:
 | Decision | Rationale |
 |---|---|
 | **Persistent pipe-fed FFmpeg** | Prevents RTSP stream drops during idle↔clip transitions. Clients stay connected. |
-| **Python-generated idle frames** | Avoids needing a second long-running FFmpeg process. Blue/red frames are pre-computed once. |
+| **Python-generated idle frames** | Avoids needing a second long-running FFmpeg process. The black frame is pre-computed once. |
 | **Raw YUV420P through pipe** | Simple, no container format needed. Frame boundaries are implicit (fixed size). |
 | **Python as frame middleman for clips** | Ensures only complete frames reach the pipe. Partial frames from clip EOF are discarded. |
 | **File settle detection** | FTP uploads take time. We poll file size and only process once it stops growing. |
@@ -103,7 +103,7 @@ Time ─────────────────────────
 Reolink:   [sleeping]     [MOTION!] ──record──→ [FTP upload] ──→ [sleeping]
 Watch Dir:                                       [file appears, grows, done]
 Pipe:      [idle frames]  ────────────────────→  [clip frames] → [idle frames]
-RTSP:      [connected, blue/red]   ────────────→ [sees clip!]  → [blue/red]
+RTSP:      [connected, black]      ────────────→ [sees clip!]  → [black]
 ```
 
 ## File Structure
@@ -111,8 +111,11 @@ RTSP:      [connected, blue/red]   ────────────→ [sees
 ```
 src/reo_bridge/
 ├── __init__.py
-├── config.py     # Environment variable configuration
-├── main.py       # Entry point — main loop writes idle frames or plays clips
-├── stream.py     # Pipe-based FFmpeg pipeline (persistent output + clip decoder)
-└── watcher.py    # Folder monitoring with watchdog
+├── config.py            # Environment variable configuration
+├── encoder_params.py    # Thread-safe mutable encoder settings (tuned via web UI)
+├── streaming_params.py  # Thread-safe mutable streaming settings (realtime mode)
+├── main.py              # Entry point — main loop writes idle frames or plays clips
+├── stream.py            # Pipe-based FFmpeg pipeline (persistent output + clip decoder)
+├── watcher.py           # Folder monitoring with watchdog
+└── web.py               # Flask web UI + JSON API for live encoder tuning
 ```
