@@ -227,3 +227,22 @@ Implements `docs/REMEDIATION_PLAN.md` Phase 2 plus new audit findings §6.1–6.
   even (YUV420P), FPS positive
 - [x] Verified via failure drills: truncated MP4, encoder process kill, MediaMTX
   restart mid-stream, `mv` into watch dir, `docker stop` during clip, invalid config
+
+## Phase 3 — Checkpoint 4: Performance & Deployment — COMPLETE
+
+**Date:** 2026-07-03
+
+Implements `docs/REMEDIATION_PLAN.md` Phase 3 plus audit §5:
+
+- [x] **Pipe enlarged to 1 MiB** (`F_SETPIPE_SZ`, best-effort): ~16× fewer write
+  syscalls per 5.3 MiB frame
+- [x] **Frame buffer reuse in the decode loop**: `readinto()` a preallocated
+  `bytearray` with a short-read top-up loop (preserves the frame-alignment
+  invariant) instead of allocating a fresh ~5.3 MiB `bytes` per frame
+- [x] **Dockerfile**: dependency layer split from source layer (source edits no
+  longer reinstall Flask/watchdog), `PYTHONUNBUFFERED=1` (logs stream in real time),
+  `HEALTHCHECK` against the web API (respects `WEB_PORT`)
+- [x] **Images pinned**: `bluenviron/mediamtx:1.16.3`, `stilliard/pure-ftpd` by digest
+  (publishes no version tags)
+- [x] CPU before/after measured with `docker stats` (idle + during clip); clip
+  playback re-verified frame-exact after the buffer change

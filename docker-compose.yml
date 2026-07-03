@@ -4,7 +4,8 @@ services:
   # The bridge pushes video here; Frigate connects here to pull it.
   # ------------------------------------------------------------------
   mediamtx:
-    image: bluenviron/mediamtx:latest
+    # Pinned: MediaMTX has changed config semantics between minor versions
+    image: bluenviron/mediamtx:1.16.3
     ports:
       # RTSP port — Frigate connects to rtsp://this-host:8654/camera
       # (8554 is avoided — Frigate uses it for its own restreaming)
@@ -64,7 +65,8 @@ services:
   # Cameras upload clips here; they land in the shared watch volume.
   # ------------------------------------------------------------------
   ftp:
-    image: stilliard/pure-ftpd
+    # Pinned by digest — this image only publishes a moving "latest" tag
+    image: stilliard/pure-ftpd@sha256:bfdfe0d725bee473b6c06ec0c39d6956dcaa2a504a1e33825ecf41242f05b436
     ports:
       # FTP command port
       - "21:21"

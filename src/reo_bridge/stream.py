@@ -5,6 +5,7 @@ Idle frames (black) and clip frames are written to the same pipe,
 so the RTSP stream never drops during switchovers.
 """
 
+import fcntl
 import logging
 import os
 import signal
@@ -66,6 +67,14 @@ class StreamManager:
     def _start_encoder(self) -> None:
         """Start (or restart) the output FFmpeg with current encoder params."""
         read_fd, self._write_fd = os.pipe()
+
+        # A raw 1440p frame is ~5.3 MiB; the default 64 KiB pipe forces ~85
+        # write syscalls per frame. Enlarging it is best-effort — the limit
+        # (fs.pipe-max-size) varies by host and the default still works.
+        try:
+            fcntl.fcntl(self._write_fd, fcntl.F_SETPIPE_SZ, 1024 * 1024)
+        except OSError:
+            pass
 
         w = self._config.stream_width
         h = self._config.stream_height
@@ -244,16 +253,28 @@ class StreamManager:
             target=_drain, args=(proc.stderr,), daemon=True, name="decoder-stderr"
         ).start()
 
+        # Read into one preallocated buffer instead of allocating a fresh
+        # ~5.3 MiB bytes object per frame. readinto() may return short reads
+        # mid-stream (unlike .read(n)), so top up until the frame is complete
+        # — frame alignment is what keeps the output stream uncorrupted.
+        buf = bytearray(self._frame_size)
+        view = memoryview(buf)
+
         frames = 0
         aborted = False
         while True:
             if self._shutdown.is_set() or self._encoder_dead:
                 aborted = True
                 break
-            data = proc.stdout.read(self._frame_size)
-            if len(data) < self._frame_size:
+            n = proc.stdout.readinto(view)
+            while 0 < n < self._frame_size:
+                more = proc.stdout.readinto(view[n:])
+                if not more:
+                    break
+                n += more
+            if n < self._frame_size:
                 break  # EOF / partial frame — discard
-            if not self._write_to_pipe(data):
+            if not self._write_to_pipe(view):
                 aborted = True
                 break
             frames += 1
@@ -307,7 +328,7 @@ class StreamManager:
     #  Internals
     # ------------------------------------------------------------------ #
 
-    def _write_to_pipe(self, data: bytes) -> bool:
+    def _write_to_pipe(self, data: bytes | memoryview) -> bool:
         """Write all bytes to the pipe, handling partial writes.
 
         Returns False (and marks the encoder dead) instead of raising if the
