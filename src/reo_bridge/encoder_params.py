@@ -15,8 +15,8 @@ PRESETS = [
     "fast", "medium", "slow", "slower", "veryslow",
 ]
 
-# Valid x264 tunes
-TUNES = ["zerolatency", "film", "animation", "grain", "stillimage", "psnr", "ssim"]
+# Valid x264 tunes ("none" = no -tune flag; best quality per bit for this stream)
+TUNES = ["none", "zerolatency", "film", "animation", "grain", "stillimage", "psnr", "ssim"]
 
 # Rate-control modes
 RATE_MODES = ["cbr", "crf"]
@@ -28,12 +28,12 @@ class EncoderParams:
 
     # Rate control
     rate_mode: str = "cbr"       # "cbr" or "crf"
-    bitrate_kbps: int = 1500     # used when rate_mode == "cbr"
+    bitrate_kbps: int = 4500     # CBR target; in CRF mode acts as the max-bitrate cap
     crf: int = 23                # used when rate_mode == "crf" (0=lossless, 51=worst)
 
     # x264 settings
     preset: str = "ultrafast"
-    tune: str = "zerolatency"
+    tune: str = "none"           # "none" = no -tune flag
     gop_frames: int = 40         # keyframe interval in frames (default: fps*2)
 
     # Audio
@@ -77,13 +77,24 @@ class EncoderParams:
             args = [
                 "-c:v", "libx264",
                 "-preset", self.preset,
-                "-tune", self.tune,
-                "-g", str(self.gop_frames),
             ]
+            if self.tune != "none":
+                args += ["-tune", self.tune]
+            args += ["-g", str(self.gop_frames)]
+
+            # VBV constraints in both modes: without -maxrate/-bufsize, x264
+            # exhausts the frame's bit budget partway down on high-motion
+            # frames and crushes the bottom rows with coarse quantization.
             if self.rate_mode == "crf":
+                # Capped CRF: constant quality, bitrate_kbps is the ceiling
                 args += ["-crf", str(self.crf)]
             else:
+                # True CBR (plain -b:v alone is only average bitrate)
                 args += ["-b:v", f"{self.bitrate_kbps}k"]
+            args += [
+                "-maxrate", f"{self.bitrate_kbps}k",
+                "-bufsize", f"{self.bitrate_kbps * 2}k",
+            ]
 
             args += ["-c:a", "aac", "-b:a", f"{self.audio_bitrate_kbps}k"]
             return args

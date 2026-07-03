@@ -49,10 +49,14 @@ services:
       # Web UI port (for tuning encoder settings)
       # (5000 is avoided — Frigate uses it for its own web UI)
       WEB_PORT: "5001"
+
+      # Where web-UI tuned settings are persisted (survives restarts)
+      # PARAMS_FILE: /data/params.json
     ports:
       - "5001:5001"
     volumes:
       - ./watch_dir:/watch
+      - ./data:/data
     restart: unless-stopped
 
   # ------------------------------------------------------------------

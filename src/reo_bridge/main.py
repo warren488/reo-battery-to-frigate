@@ -6,6 +6,7 @@ import signal
 
 from .config import Config
 from .encoder_params import EncoderParams
+from .persistence import load_params
 from .stream import StreamManager
 from .streaming_params import StreamingParams
 from .watcher import FolderWatcher
@@ -29,6 +30,20 @@ def main() -> None:
         realtime_streaming=config.realtime_streaming,
         realtime_delay_seconds=config.realtime_delay_seconds,
     )
+
+    # Restore parameters tuned via the web UI in a previous run (fail-soft:
+    # a stale or corrupt file must never prevent startup)
+    saved = load_params(config.params_file)
+    if saved:
+        try:
+            enc = {k: v for k, v in saved.get("encoder", {}).items() if k != "version"}
+            if enc:
+                encoder_params.update(**enc)
+            if saved.get("streaming"):
+                streaming_params.update(**saved["streaming"])
+            log.info("Restored saved params from %s", config.params_file)
+        except (ValueError, TypeError) as e:
+            log.warning("Ignoring invalid saved params in %s: %s", config.params_file, e)
 
     log.info("Config: watch_dir=%s  rtsp=%s  resolution=%dx%d@%dfps",
              config.watch_dir, config.rtsp_output_url,

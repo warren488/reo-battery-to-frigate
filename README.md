@@ -95,14 +95,14 @@ Adjustable parameters:
 | Parameter | Range | Default | Description |
 |-----------|-------|---------|-------------|
 | Rate mode | CBR / CRF | CBR | Constant bitrate vs. constant quality |
-| Bitrate | 200–10,000 kbps | 1500 kbps | Target bitrate (CBR mode) |
+| Bitrate | 200–10,000 kbps | 4500 kbps | Target bitrate (CBR) or max-bitrate cap (CRF) |
 | CRF | 0–51 | 23 | Quality level (CRF mode, lower = better) |
 | Preset | ultrafast → veryslow | ultrafast | Encoding speed vs. compression tradeoff |
-| Tune | zerolatency, film, etc. | zerolatency | Content-type optimization |
+| Tune | none, zerolatency, etc. | none | Content-type optimization (`none` = best quality per bit) |
 | GOP | 1–300 frames | 40 | Keyframe interval |
 | Audio bitrate | 32–320 kbps | 64 kbps | AAC audio quality |
 
-Clicking **Apply** restarts the encoder with the new settings (~1-2 second stream interruption).
+Clicking **Apply** restarts the encoder with the new settings (~1-2 second stream interruption). Applied settings are saved to `./data/params.json` and survive container restarts.
 
 ## Configuration
 
@@ -117,6 +117,7 @@ All settings are controlled via environment variables in `docker-compose.yml`:
 | `DELETE_AFTER_STREAM` | `false` | Remove clip files after they've been played |
 | `RTSP_OUTPUT_URL` | `rtsp://mediamtx:8554/camera`¹ | Internal RTSP push target |
 | `WEB_PORT` | `5001` | Web UI port |
+| `PARAMS_FILE` | `/data/params.json` | Where web-UI tuned settings are persisted |
 
 ¹ Value set in `docker-compose.yml`. The application's built-in default is `rtsp://localhost:8554/camera` (for running outside Docker).
 

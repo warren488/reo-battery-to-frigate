@@ -165,3 +165,40 @@ code quality, testing/CI, documentation accuracy, and web UI/UX. See
   player (port 8889) for closed-loop tuning, persistence warning.
 - No code changes made — audit only. Prioritized launch checklist at the end of the
   audit doc.
+
+## Phase 3: OSS Launch Prep — Checkpoint 1: Publish Blockers & Doc Truth — COMPLETE
+
+**Date:** 2026-07-03
+
+First of six pre-publication checkpoints (plan in `docs/OSS_READINESS_AUDIT.md`):
+
+- [x] Added MIT `LICENSE`; completed `pyproject.toml` metadata (license, readme,
+  authors, keywords, classifiers, urls); package renamed to
+  `reolink-battery-frigate-bridge` (GitHub repo rename pending — owner action)
+- [x] Added `.dockerignore` — camera footage, `.git`, `.env`, and docs no longer enter
+  the Docker build context
+- [x] `.env.example`: real LAN IP replaced with placeholder; credential warning added
+- [x] Fixed `docs/SETUP.md` directing Frigate/VLC to the wrong RTSP port (8554 → 8654)
+- [x] Synced all docs with code: black idle frames, `./watch_dir` bind mount, complete
+  module listings, chronological ordering of this file
+
+## Phase 3 — Checkpoint 2: Stream Quality (Artifacting Fix) — COMPLETE
+
+**Date:** 2026-07-03
+
+Implements `docs/REMEDIATION_PLAN.md` Phase 1 (root cause of the bottom-of-frame
+blocking during motion — see `docs/EFFICIENCY_REPORT.md` Part 1):
+
+- [x] Default bitrate 1500 → **4500 kbps** (`encoder_params.py`)
+- [x] **VBV constraints in both rate modes** (`-maxrate`/`-bufsize 2×`): CBR is now
+  true CBR instead of unconstrained ABR; CRF is capped CRF with `bitrate_kbps` as the
+  ceiling. This smooths in-frame bit allocation — the direct fix for bottom-rows
+  quantization collapse.
+- [x] Default tune `zerolatency` → **`none`** (no `-tune` flag emitted) — re-enables
+  lookahead and normal frame threading; removes sliced-thread banding
+- [x] Web UI: bitrate slider now visible in CRF mode as "Max Bitrate"; help text
+  updated (bitrate guidance, tune recommendation, persistence note)
+- [x] **Settings persistence**: new `persistence.py` (atomic JSON write, fail-soft
+  load), `PARAMS_FILE` config (default `/data/params.json`), saved on every web-UI
+  apply, restored at startup; `./data:/data` volume added to compose
+- [x] README parameter tables re-synced (defaults, persistence, `PARAMS_FILE`)

@@ -9,6 +9,7 @@ from flask import Flask, Response, request
 
 from .config import Config
 from .encoder_params import PRESETS, RATE_MODES, TUNES, EncoderParams
+from .persistence import save_params
 from .streaming_params import StreamingParams
 
 log = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ def set_encoder():
 
     _encoder_params.update(**updates)
     log.info("Encoder params updated: %s", updates)
+    _persist()
     return _encoder_params.snapshot()
 
 
@@ -113,6 +115,7 @@ def set_streaming():
 
     _streaming_params.update(**updates)
     log.info("Streaming params updated: %s", updates)
+    _persist()
     return _streaming_params.snapshot()
 
 
@@ -123,6 +126,15 @@ def get_options():
         "tunes": TUNES,
         "rate_modes": RATE_MODES,
     }
+
+
+def _persist() -> None:
+    """Write the current tuned params to disk so they survive restarts."""
+    encoder = {k: v for k, v in _encoder_params.snapshot().items() if k != "version"}
+    save_params(_config.params_file, {
+        "encoder": encoder,
+        "streaming": _streaming_params.snapshot(),
+    })
 
 
 def _validate_streaming(data: dict) -> list[str]:
@@ -432,7 +444,8 @@ _INDEX_HTML = """\
   <div class="section-help">
     Changes take effect when you click <strong>Apply</strong> below. The encoder pipeline
     restarts with the new settings, causing a brief stream interruption (~1-2 seconds).
-    Frigate and VLC will reconnect automatically.
+    Frigate and VLC will reconnect automatically. Applied settings are saved to disk and
+    survive container restarts.
   </div>
 
   <!-- Rate Control -->
@@ -447,26 +460,27 @@ _INDEX_HTML = """\
     </div>
     <div class="help">
       <strong>CBR</strong> enforces a fixed bitrate &mdash; predictable bandwidth usage, good for
-      network-constrained setups. <strong>CRF</strong> targets a constant visual quality and lets the
-      bitrate vary &mdash; often more efficient, but bitrate spikes on complex scenes.
-      <strong>Recommendation:</strong> start with CBR for Frigate; try CRF if you want smaller files
-      with consistent quality.
+      network-constrained setups. <strong>CRF</strong> targets a constant visual quality and only
+      spends bits when the scene needs them, up to the Max Bitrate cap.
+      <strong>Recommendation:</strong> start with CBR for Frigate; try CRF if you want smaller
+      streams with consistent quality.
     </div>
   </div>
 
-  <!-- Bitrate (CBR) -->
+  <!-- Bitrate (CBR target / CRF cap) -->
   <div class="field-group" id="field-bitrate">
     <div class="field">
-      <label>Bitrate</label>
+      <label id="bitrate-label">Bitrate</label>
       <input type="range" id="bitrate" min="200" max="10000" step="100">
       <span class="value" id="bitrate-val"></span>
     </div>
     <div class="help">
-      Higher = better quality but more CPU and bandwidth.
-      For <strong>2K (2560x1440)</strong>: 2000-4000 kbps is a good range.
-      For <strong>1080p</strong>: 1000-2500 kbps.
-      <span class="warn">Below 1000 kbps at 2K you'll see heavy blocking artifacts.</span>
-      Going above 6000 kbps usually has diminishing returns for security camera footage.
+      In CBR mode this is the target bitrate; in CRF mode it caps how high the bitrate may
+      spike. Higher = better quality but more CPU and bandwidth.
+      For <strong>2K (2560x1440)</strong>: 4000-6000 kbps keeps motion clean.
+      For <strong>1080p</strong>: 2000-3000 kbps.
+      <span class="warn">Below 2000 kbps at 2K you'll see heavy blocking artifacts during motion.</span>
+      Going above 8000 kbps usually has diminishing returns for security camera footage.
     </div>
   </div>
 
@@ -512,13 +526,13 @@ _INDEX_HTML = """\
     </div>
     <div class="help">
       Optimizes the encoder for specific content types.
-      <strong>zerolatency</strong>: removes encoder buffering for lowest delay &mdash;
-      best for live monitoring. Slightly lower compression efficiency.
-      <strong>film</strong>: good for general real-world video with natural grain.
-      <strong>grain</strong>: preserves film grain/noise (uses more bitrate).
-      <strong>animation</strong>: better for flat areas and sharp edges.
-      <strong>Recommendation:</strong> keep <strong>zerolatency</strong> unless you're
-      experiencing specific visual issues.
+      <strong>none</strong>: standard encoding with lookahead &mdash; best quality per bit.
+      <strong>zerolatency</strong>: removes encoder buffering to save ~1s of delay, but
+      costs quality and can cause banding &mdash; this stream replays footage that is already
+      minutes old, so the saved second buys nothing.
+      <strong>film</strong>: good for real-world video with natural grain.
+      <strong>grain</strong>: preserves grain/noise (uses more bitrate).
+      <strong>Recommendation:</strong> keep <strong>none</strong>.
     </div>
   </div>
 
@@ -719,9 +733,10 @@ function setRateMode(mode) {
     b.classList.toggle('active', b.dataset.value === mode);
     b.onclick = () => setRateMode(b.dataset.value);
   });
-  // field-group wrappers include the help text
-  document.getElementById('field-bitrate').classList.toggle('hidden', mode !== 'cbr');
+  // The bitrate slider stays visible in both modes: it's the CBR target or,
+  // in CRF mode, the max-bitrate cap.
   document.getElementById('field-crf').classList.toggle('hidden', mode !== 'crf');
+  document.getElementById('bitrate-label').textContent = mode === 'crf' ? 'Max Bitrate' : 'Bitrate';
 }
 
 function getActiveRateMode() {

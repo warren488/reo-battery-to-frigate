@@ -43,3 +43,8 @@ class Config:
 
     # Seconds to wait after file creation before queueing in realtime mode.
     realtime_delay_seconds: float = float(os.environ.get("REALTIME_DELAY_SECONDS", "5.0"))
+
+    # Where web-UI tuned parameters are persisted across restarts
+    params_file: Path = field(
+        default_factory=lambda: Path(os.environ.get("PARAMS_FILE", "/data/params.json"))
+    )
