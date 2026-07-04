@@ -6,8 +6,8 @@ welcome.
 ## Development setup
 
 ```bash
-git clone https://github.com/warren488/reolink-battery-frigate-bridge.git
-cd reolink-battery-frigate-bridge
+git clone https://github.com/warren488/reolink-battery-to-frigate.git
+cd reolink-battery-to-frigate
 
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"

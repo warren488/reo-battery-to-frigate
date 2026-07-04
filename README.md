@@ -1,6 +1,6 @@
 # Reo Bridge — Battery Camera to Frigate
 
-[![CI](https://github.com/warren488/reolink-battery-frigate-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/warren488/reolink-battery-frigate-bridge/actions/workflows/ci.yml)
+[![CI](https://github.com/warren488/reolink-battery-to-frigate/actions/workflows/ci.yml/badge.svg)](https://github.com/warren488/reolink-battery-to-frigate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A bridge that turns Reolink battery camera motion clips into a continuous RTSP stream for [Frigate NVR](https://frigate.video/).
@@ -50,8 +50,8 @@ The output FFmpeg never restarts, so the RTSP connection stays up through all tr
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/warren488/reolink-battery-frigate-bridge.git
-cd reolink-battery-frigate-bridge
+git clone https://github.com/warren488/reolink-battery-to-frigate.git
+cd reolink-battery-to-frigate
 
 cp .env.example .env
 ```

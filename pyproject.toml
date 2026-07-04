@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reolink-battery-frigate-bridge"
+name = "reolink-battery-to-frigate"
 version = "0.1.0"
 description = "Bridge between Reolink battery cameras (FTP uploads) and Frigate NVR (continuous RTSP stream)"
 readme = "README.md"
@@ -29,8 +29,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/warren488/reolink-battery-frigate-bridge"
-Issues = "https://github.com/warren488/reolink-battery-frigate-bridge/issues"
+Homepage = "https://github.com/warren488/reolink-battery-to-frigate"
+Issues = "https://github.com/warren488/reolink-battery-to-frigate/issues"
 
 [project.optional-dependencies]
 dev = [
