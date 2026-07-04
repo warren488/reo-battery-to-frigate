@@ -53,6 +53,12 @@ services:
 
       # Where web-UI tuned settings are persisted (survives restarts)
       # PARAMS_FILE: /data/params.json
+
+      # Mirrors of the FTP settings below — shown in the web UI's
+      # "Camera FTP Setup" card so you can copy them into the camera
+      FTP_PUBLIC_HOST: "${FTP_PUBLIC_HOST:-}"
+      FTP_USER: "${FTP_USER:-reolink}"
+      FTP_PASS: "${FTP_PASS:-reolink}"
     ports:
       - "5001:5001"
     volumes:

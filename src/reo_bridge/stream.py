@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .config import Config
 from .encoder_params import EncoderParams
+from .status import BridgeStatus
 from .streaming_params import StreamingParams
 
 log = logging.getLogger(__name__)
@@ -38,11 +39,13 @@ class StreamManager:
         encoder_params: EncoderParams,
         streaming_params: StreamingParams,
         shutdown_event: threading.Event | None = None,
+        status: BridgeStatus | None = None,
     ) -> None:
         self._config = config
         self._encoder_params = encoder_params
         self._streaming_params = streaming_params
         self._shutdown = shutdown_event or threading.Event()
+        self._status = status
         self._output_proc: subprocess.Popen | None = None
         self._write_fd: int | None = None
         self._encoder_version: int = -1  # track which version we're running
@@ -201,11 +204,17 @@ class StreamManager:
     def stream_file(self, path: Path) -> None:
         """Decode a clip and feed its frames into the persistent pipe."""
         log.info("Streaming file: %s", path.name)
+        if self._status:
+            self._status.clip_started(path.name)
+
         if self._streaming_params.realtime_streaming:
-            self._stream_file_realtime(path)
+            frames = self._stream_file_realtime(path)
         else:
             frames = self._decode_from_offset(path, 0.0)
             log.info("Finished streaming: %s (%d frames)", path.name, frames)
+
+        if self._status:
+            self._status.clip_finished(path.name, frames)
         # Clip pacing came from the decoder's -re, not our idle schedule
         self._next_deadline = None
 
@@ -292,13 +301,18 @@ class StreamManager:
 
         return frames
 
-    def _stream_file_realtime(self, path: Path) -> None:
-        """Realtime mode: decode, then resume if the file grew while decoding."""
+    def _stream_file_realtime(self, path: Path) -> int:
+        """Realtime mode: decode, then resume if the file grew while decoding.
+
+        Returns the total number of frames streamed across all resume passes.
+        """
         offset_seconds = 0.0
         size_before = 0
+        total_frames = 0
 
         while True:
             frames = self._decode_from_offset(path, offset_seconds)
+            total_frames += frames
 
             if self._shutdown.is_set() or self._encoder_dead:
                 break
@@ -322,7 +336,8 @@ class StreamManager:
 
             size_before = size_after
 
-        log.info("Finished realtime streaming: %s", path.name)
+        log.info("Finished realtime streaming: %s (%d frames)", path.name, total_frames)
+        return total_frames
 
     # ------------------------------------------------------------------ #
     #  Internals

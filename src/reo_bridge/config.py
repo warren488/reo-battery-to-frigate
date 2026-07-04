@@ -82,6 +82,15 @@ class Config:
         default_factory=lambda: Path(os.environ.get("PARAMS_FILE", "/data/params.json"))
     )
 
+    # FTP details shown in the web UI so users can copy them into the camera.
+    # Informational only — the FTP server itself is a separate container.
+    ftp_public_host: str = field(
+        default_factory=lambda: os.environ.get("FTP_PUBLIC_HOST", "")
+    )
+    ftp_port: int = field(default_factory=lambda: _env_int("FTP_PORT", 21))
+    ftp_user: str = field(default_factory=lambda: os.environ.get("FTP_USER", ""))
+    ftp_pass: str = field(default_factory=lambda: os.environ.get("FTP_PASS", ""))
+
     def __post_init__(self) -> None:
         if self.stream_width <= 0 or self.stream_height <= 0:
             raise ValueError(

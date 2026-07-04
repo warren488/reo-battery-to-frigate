@@ -18,6 +18,14 @@ def client(tmp_path, monkeypatch):
     return app.test_client()
 
 
+def test_get_status(client):
+    data = client.get("/api/status").get_json()
+    assert data["state"] == "idle"
+    assert data["queue_depth"] == 0
+    assert "encoder_alive" in data
+    assert data["uptime_seconds"] >= 0
+
+
 def test_get_encoder(client):
     data = client.get("/api/encoder").get_json()
     assert data["bitrate_kbps"] == 4500
@@ -28,6 +36,24 @@ def test_get_config(client):
     data = client.get("/api/config").get_json()
     assert data["stream_width"] == 2560
     assert "rtsp_output_url" in data
+    # Without FTP env vars the card data is present but marked unconfigured
+    assert data["ftp"]["configured"] is False
+
+
+def test_get_config_ftp_block(tmp_path, monkeypatch):
+    monkeypatch.setenv("PARAMS_FILE", str(tmp_path / "params.json"))
+    monkeypatch.setenv("FTP_PUBLIC_HOST", "192.168.1.50")
+    monkeypatch.setenv("FTP_USER", "cam")
+    monkeypatch.setenv("FTP_PASS", "secret")
+    app = web.init_app(Config(), EncoderParams(), StreamingParams())
+    data = app.test_client().get("/api/config").get_json()
+    assert data["ftp"] == {
+        "configured": True,
+        "host": "192.168.1.50",
+        "port": 21,
+        "user": "cam",
+        "password": "secret",
+    }
 
 
 def test_get_options_includes_none_tune(client):

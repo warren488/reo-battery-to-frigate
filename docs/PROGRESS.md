@@ -274,3 +274,36 @@ First test suite and continuous integration for the project:
   (with ffmpeg for integration tests), docker build
 - [x] CI + license badges in README
 - [x] Full suite verified green both on the host venv and inside the built container
+
+## Phase 3 — Checkpoint 6: UI/UX & Community Polish — COMPLETE
+
+**Date:** 2026-07-03
+
+Final pre-publication checkpoint:
+
+- [x] **`GET /api/status`** + new `status.py` (`BridgeStatus`, thread-safe, provider
+  callables for queue depth / encoder health) — reports idle/streaming, current file,
+  queue depth, encoder liveness, last clip (name/frames/when), uptime
+- [x] **Live status card** in the web UI, polled every 2s, with idle / streaming /
+  encoder-down badge
+- [x] **Live preview card**: on-demand iframe of MediaMTX's built-in HLS player
+  (port 8889) — closed-loop encoder tuning without leaving the page
+- [x] Accessibility: labels associated with inputs (`for`/`id`), larger help text,
+  iframe title, favicon (no more 404 noise)
+- [x] **`DELETE_AFTER_STREAM` now cleans up properly**: deletes the camera's `.jpg`
+  snapshots in the clip's folder and prunes empty date directories (never the watch
+  dir itself); covered by tests
+- [x] Queue-backlog logging when clips pile up; realtime mode reports total frames
+- [x] README: **Limitations** section (delayed footage, timestamps, moov, no audio,
+  1× queue drain), **Security Notes** section (cleartext FTP, unauthenticated web UI
+  + how to bind it to localhost, open MediaMTX, "use a VPN"), Frigate detect-resolution
+  tip, screenshot placeholder
+- [x] `CONTRIBUTING.md` (dev setup, CI checks, PR expectations, bug-report info) and
+  GitHub issue templates (bug: asks for logs/camera/resolution; feature request)
+- [x] **Camera FTP Setup card**: the FTP settings (`FTP_PUBLIC_HOST`/`FTP_USER`/
+  `FTP_PASS`) are now mirrored into the bridge container and shown in the web UI so
+  users can copy them straight into the camera — password masked with a show/hide
+  toggle, host falls back to the page's hostname with a hint when
+  `FTP_PUBLIC_HOST` is unset; card hidden entirely when the env vars aren't passed
+- [x] Test count now 53 (status lifecycle, cleanup behavior, /api/status, FTP config
+  block)

@@ -81,7 +81,7 @@ class _VideoFileHandler(FileSystemEventHandler):
             time.sleep(self._config.settle_seconds)
 
         log.info("File ready: %s (%d bytes)", path.name, prev_size)
-        self._queue.put(path)
+        self._enqueue(path)
 
     def _wait_delay_and_enqueue(self, path: Path) -> None:
         """Realtime mode: wait a fixed delay, then queue regardless of upload state."""
@@ -92,7 +92,13 @@ class _VideoFileHandler(FileSystemEventHandler):
             log.warning("File disappeared before realtime queue: %s", path.name)
             return
         log.info("Realtime: queueing %s (%d bytes, upload may still be in progress)", path.name, size)
+        self._enqueue(path)
+
+    def _enqueue(self, path: Path) -> None:
         self._queue.put(path)
+        backlog = self._queue.qsize()
+        if backlog > 1:
+            log.info("Queue backlog: %d clips waiting (playback is 1x real time)", backlog)
 
 
 class FolderWatcher:
@@ -118,6 +124,10 @@ class FolderWatcher:
             return self._queue.get(timeout=timeout)
         except queue.Empty:
             return None
+
+    def queue_depth(self) -> int:
+        """Number of clips currently waiting to be streamed."""
+        return self._queue.qsize()
 
     def stop(self) -> None:
         self._observer.stop()

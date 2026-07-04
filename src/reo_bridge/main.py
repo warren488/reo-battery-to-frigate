@@ -5,16 +5,47 @@ import os
 import signal
 import threading
 import time
+from pathlib import Path
 
 from .config import Config
 from .encoder_params import EncoderParams
 from .persistence import load_params
+from .status import BridgeStatus
 from .stream import StreamManager
 from .streaming_params import StreamingParams
 from .watcher import FolderWatcher
 from .web import start_in_background
 
 log = logging.getLogger(__name__)
+
+
+def _cleanup_streamed_file(config: Config, path: Path) -> None:
+    """Delete a streamed clip, its snapshot siblings, and empty date dirs.
+
+    Reolink cameras upload a .jpg snapshot beside every clip into nested
+    date folders; without this sweep both accumulate forever when
+    DELETE_AFTER_STREAM is enabled.
+    """
+    log.info("Deleting streamed file: %s", path.name)
+    path.unlink(missing_ok=True)
+
+    parent = path.parent.resolve()
+    watch = config.watch_dir.resolve()
+
+    try:
+        for snap in parent.glob("*.jpg"):
+            snap.unlink(missing_ok=True)
+    except OSError as e:
+        log.warning("Snapshot cleanup failed in %s: %s", parent, e)
+
+    # Prune now-empty directories upward, never touching the watch dir itself
+    d = parent
+    while d != watch and d.is_relative_to(watch):
+        try:
+            d.rmdir()
+        except OSError:
+            break  # not empty — stop
+        d = d.parent
 
 
 def main() -> None:
@@ -61,8 +92,15 @@ def main() -> None:
     # playing out past Docker's stop grace period.
     shutdown = threading.Event()
 
+    status = BridgeStatus()
     watcher = FolderWatcher(config, streaming_params)
-    streamer = StreamManager(config, encoder_params, streaming_params, shutdown_event=shutdown)
+    streamer = StreamManager(
+        config, encoder_params, streaming_params, shutdown_event=shutdown, status=status
+    )
+    status.set_providers(
+        queue_depth=watcher.queue_depth,
+        encoder_alive=lambda: not streamer.encoder_dead(),
+    )
 
     def _handle_signal(signum, _frame):
         log.info("Received signal %s — shutting down", signal.Signals(signum).name)
@@ -73,7 +111,7 @@ def main() -> None:
 
     # Start the web UI
     web_port = int(os.environ.get("WEB_PORT", "5000"))
-    start_in_background(config, encoder_params, streaming_params, port=web_port)
+    start_in_background(config, encoder_params, streaming_params, status, port=web_port)
 
     # Start the persistent pipeline and folder watcher
     watcher.start()
@@ -108,8 +146,7 @@ def main() -> None:
                 streamer.stream_file(path)
 
                 if config.delete_after_stream:
-                    log.info("Deleting streamed file: %s", path.name)
-                    path.unlink(missing_ok=True)
+                    _cleanup_streamed_file(config, path)
             else:
                 # No clip — write one idle frame (includes rate-limiting sleep)
                 streamer.write_idle_frame()

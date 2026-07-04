@@ -24,6 +24,27 @@ A single output FFmpeg process reads raw video from an OS pipe and encodes it to
 
 The output FFmpeg never restarts, so the RTSP connection stays up through all transitions.
 
+<!-- Screenshot placeholder: add docs/images/web-ui.png (the Stream Tuner page) and
+     uncomment before publishing:
+![Stream Tuner web UI](docs/images/web-ui.png)
+-->
+
+## Limitations — read this first
+
+- **Footage is delayed, not live.** A clip must be recorded, uploaded via FTP, and
+  settle before it plays — everything you see is typically 30 seconds to a few
+  minutes old. Frigate will detect and record events fine, but its **timestamps
+  reflect playback time, not when the event actually happened**. This is a review
+  pipeline, not live monitoring.
+- **Standard MP4 uploads can't stream mid-upload.** The MP4 index (`moov`) is
+  written last, so the experimental realtime mode only helps cameras that upload
+  fragmented MP4 or FLV.
+- **No camera audio.** The stream carries a silent audio track; clip audio is not
+  passed through (planned idea, non-trivial).
+- **Clips play at 1× speed.** If many events arrive at once, the queue drains in
+  real time and the stream falls further behind reality (the web UI shows queue
+  depth).
+
 ## Quick Start
 
 ### 1. Clone and configure
@@ -89,9 +110,16 @@ cameras:
       fps: 20
 ```
 
+> **Tip:** running `detect` at full 2560×1440@20 is heavy. Most setups should let
+> this stream feed `record` at full resolution and give `detect` a reduced
+> resolution/fps (see Frigate's docs on detect settings) — motion detection does
+> not need 2K.
+
 ## Web UI — Stream Tuner
 
 Open `http://<bridge-host>:5001` to tune encoder settings in real time. This helps you find the right balance between stream quality and CPU/bandwidth usage.
+
+The page shows a **live status card** (idle/streaming, current clip, queue depth, encoder health, uptime — via `GET /api/status`) and an on-demand **live preview** of the output stream using MediaMTX's built-in HLS player, so you can see the effect of encoder changes without leaving the page.
 
 Adjustable parameters:
 
@@ -117,7 +145,7 @@ All settings are controlled via environment variables in `docker-compose.yml`:
 | `STREAM_HEIGHT` | `1440` | Output stream height |
 | `STREAM_FPS` | `20` | Output stream frame rate |
 | `SETTLE_SECONDS` | `2.0` | Seconds to wait for a file to stop growing before streaming |
-| `DELETE_AFTER_STREAM` | `false` | Remove clip files after they've been played |
+| `DELETE_AFTER_STREAM` | `false` | After playing a clip: delete it, delete camera snapshot (`.jpg`) files in the same folder, and prune empty date folders |
 | `RTSP_OUTPUT_URL` | `rtsp://mediamtx:8554/camera`¹ | Internal RTSP push target |
 | `WEB_PORT` | `5001` | Web UI port |
 | `PARAMS_FILE` | `/data/params.json` | Where web-UI tuned settings are persisted |
@@ -131,6 +159,23 @@ FTP settings are in `.env`:
 | `FTP_PUBLIC_HOST` | `localhost` | This machine's LAN IP (for passive FTP) |
 | `FTP_USER` | `reolink` | FTP username |
 | `FTP_PASS` | `reolink` | FTP password |
+
+## Security Notes
+
+This stack is designed for a **trusted home LAN**. Before deploying, know what's exposed:
+
+- **FTP is cleartext.** Reolink battery cameras only speak plain FTP, so credentials
+  and footage cross your network unencrypted. Change `FTP_USER`/`FTP_PASS` from the
+  defaults, and ideally put cameras on their own VLAN.
+- **The web UI (port 5001) has no authentication.** Anyone who can reach the host can
+  change encoder settings. Docker publishes it on all interfaces and **bypasses
+  ufw/firewalld**. To restrict it to the local machine, change the port mapping to
+  `127.0.0.1:5001:5001` in `docker-compose.yml`.
+- **MediaMTX accepts any publisher/reader by default.** On a hostile LAN someone could
+  read the stream or publish over it. Restrict it with a custom `mediamtx.yml`
+  (publisher IP allowlist or credentials) if that matters in your environment.
+- **Never port-forward any of these to the internet.** If you need remote access, use
+  a VPN (WireGuard/Tailscale).
 
 ## Verifying It Works
 

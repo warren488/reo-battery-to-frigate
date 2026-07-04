@@ -8,6 +8,7 @@ from flask import Flask, Response, request
 from .config import Config
 from .encoder_params import PRESETS, RATE_MODES, TUNES, EncoderParams
 from .persistence import save_params
+from .status import BridgeStatus
 from .streaming_params import StreamingParams
 
 log = logging.getLogger(__name__)
@@ -18,20 +19,34 @@ app = Flask(__name__)
 _encoder_params: EncoderParams | None = None
 _streaming_params: StreamingParams | None = None
 _config: Config | None = None
+_status: BridgeStatus = BridgeStatus()  # fallback so /api/status always works
 
 
-def init_app(config: Config, encoder_params: EncoderParams, streaming_params: StreamingParams) -> Flask:
+def init_app(
+    config: Config,
+    encoder_params: EncoderParams,
+    streaming_params: StreamingParams,
+    status: BridgeStatus | None = None,
+) -> Flask:
     """Wire up shared state and return the Flask app."""
-    global _encoder_params, _streaming_params, _config
+    global _encoder_params, _streaming_params, _config, _status
     _encoder_params = encoder_params
     _streaming_params = streaming_params
     _config = config
+    if status is not None:
+        _status = status
     return app
 
 
-def start_in_background(config: Config, encoder_params: EncoderParams, streaming_params: StreamingParams, port: int = 5000) -> None:
+def start_in_background(
+    config: Config,
+    encoder_params: EncoderParams,
+    streaming_params: StreamingParams,
+    status: BridgeStatus | None = None,
+    port: int = 5000,
+) -> None:
     """Start the web server in a daemon thread."""
-    init_app(config, encoder_params, streaming_params)
+    init_app(config, encoder_params, streaming_params, status)
     thread = threading.Thread(
         target=lambda: app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False),
         daemon=True,
@@ -44,6 +59,11 @@ def start_in_background(config: Config, encoder_params: EncoderParams, streaming
 # ------------------------------------------------------------------ #
 #  API endpoints
 # ------------------------------------------------------------------ #
+
+@app.get("/api/status")
+def get_status():
+    return _status.snapshot()
+
 
 @app.get("/api/encoder")
 def get_encoder():
@@ -90,6 +110,14 @@ def get_config():
         "settle_seconds": _config.settle_seconds,
         "delete_after_stream": _config.delete_after_stream,
         "watch_dir": str(_config.watch_dir),
+        # What the camera's FTP settings should be (see docker-compose.yml)
+        "ftp": {
+            "configured": bool(_config.ftp_user),
+            "host": _config.ftp_public_host,
+            "port": _config.ftp_port,
+            "user": _config.ftp_user,
+            "password": _config.ftp_pass,
+        },
     }
 
 
@@ -202,6 +230,7 @@ _INDEX_HTML = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reo Bridge — Stream Tuner</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📹</text></svg>">
 <style>
   :root {
     --bg: #1a1a2e;
@@ -353,8 +382,31 @@ _INDEX_HTML = """\
     color: #fff;
     border-color: var(--accent);
   }
-  .help {
+  .badge {
     font-size: 0.75rem;
+    font-weight: 400;
+    margin-left: 0.5rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--muted);
+  }
+  .badge.live { background: var(--accent); color: #fff; }
+  .badge.down { background: #c0392b; color: #fff; }
+  .reveal-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 400;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .reveal-btn:hover { color: var(--text); border-color: var(--muted); }
+  .help {
+    font-size: 0.8rem;
     color: var(--muted);
     grid-column: 1 / -1;
     margin-top: -0.3rem;
@@ -384,10 +436,44 @@ _INDEX_HTML = """\
 <h1>Reo Bridge — Stream Tuner</h1>
 <p class="subtitle">Adjust encoder settings and apply to find the quality/performance sweet spot</p>
 
+<!-- Bridge Status (live) -->
+<div class="card">
+  <h2>Bridge Status <span class="badge" id="bridge-badge">…</span></h2>
+  <div class="info-grid" id="status-grid"></div>
+</div>
+
 <!-- Stream Info -->
 <div class="card">
   <h2>Stream Info</h2>
   <div class="info-grid" id="info-grid"></div>
+</div>
+
+<!-- Camera FTP Setup -->
+<div class="card hidden" id="ftp-card">
+  <h2>Camera FTP Setup</h2>
+  <div class="section-help">
+    Enter these values in your Reolink camera under
+    <strong>Settings &rarr; Surveillance &rarr; FTP</strong>, then enable
+    <strong>FTP upload on motion events</strong>. Leave the remote directory at its
+    default (<strong>/</strong>) &mdash; the camera creates dated subfolders on its own.
+  </div>
+  <div class="info-grid" id="ftp-grid"></div>
+</div>
+
+<!-- Live Preview -->
+<div class="card">
+  <h2>Live Preview</h2>
+  <div class="section-help">
+    Plays the output stream via MediaMTX&rsquo;s built-in HLS player (port 8889), so you can
+    see the effect of encoder changes right here. Expect several seconds of HLS latency
+    &mdash; for frame-accurate checks use VLC: <strong>rtsp://&lt;this-host&gt;:8654/camera</strong>
+  </div>
+  <button class="btn-primary" id="preview-btn" onclick="togglePreview()">Load Preview</button>
+  <div id="preview-wrap" class="hidden" style="margin-top:1rem;aspect-ratio:16/9">
+    <iframe id="preview-frame" title="Live stream preview"
+            style="width:100%;height:100%;border:0;border-radius:6px;background:#000"
+            allow="autoplay"></iframe>
+  </div>
 </div>
 
 <!-- Realtime Streaming -->
@@ -415,7 +501,7 @@ _INDEX_HTML = """\
 
   <div class="field-group" id="rt-delay-field">
     <div class="field">
-      <label>Start Delay</label>
+      <label for="rt_delay">Start Delay</label>
       <input type="range" id="rt_delay" min="0" max="60" step="0.5">
       <span class="value" id="rt_delay-val"></span>
     </div>
@@ -442,8 +528,9 @@ _INDEX_HTML = """\
   <div class="section-help">
     Changes take effect when you click <strong>Apply</strong> below. The encoder pipeline
     restarts with the new settings, causing a brief stream interruption (~1-2 seconds).
-    Frigate and VLC will reconnect automatically. Applied settings are saved to disk and
-    survive container restarts.
+    If a clip is playing, the restart happens when it finishes. Frigate and VLC will
+    reconnect automatically. Applied settings are saved to disk and survive container
+    restarts.
   </div>
 
   <!-- Rate Control -->
@@ -468,7 +555,7 @@ _INDEX_HTML = """\
   <!-- Bitrate (CBR target / CRF cap) -->
   <div class="field-group" id="field-bitrate">
     <div class="field">
-      <label id="bitrate-label">Bitrate</label>
+      <label id="bitrate-label" for="bitrate">Bitrate</label>
       <input type="range" id="bitrate" min="200" max="10000" step="100">
       <span class="value" id="bitrate-val"></span>
     </div>
@@ -485,7 +572,7 @@ _INDEX_HTML = """\
   <!-- CRF -->
   <div class="field-group hidden" id="field-crf">
     <div class="field">
-      <label>CRF</label>
+      <label for="crf">CRF</label>
       <input type="range" id="crf" min="0" max="51" step="1">
       <span class="value" id="crf-val"></span>
     </div>
@@ -500,7 +587,7 @@ _INDEX_HTML = """\
   <!-- Preset -->
   <div class="field-group">
     <div class="field">
-      <label>Preset</label>
+      <label for="preset">Preset</label>
       <select id="preset"></select>
       <span></span>
     </div>
@@ -518,7 +605,7 @@ _INDEX_HTML = """\
   <!-- Tune -->
   <div class="field-group">
     <div class="field">
-      <label>Tune</label>
+      <label for="tune">Tune</label>
       <select id="tune"></select>
       <span></span>
     </div>
@@ -537,7 +624,7 @@ _INDEX_HTML = """\
   <!-- GOP -->
   <div class="field-group">
     <div class="field">
-      <label>GOP (keyframes)</label>
+      <label for="gop_frames">GOP (keyframes)</label>
       <input type="range" id="gop_frames" min="1" max="300" step="1">
       <span class="value" id="gop_frames-val"></span>
     </div>
@@ -555,7 +642,7 @@ _INDEX_HTML = """\
   <!-- Audio Bitrate -->
   <div class="field-group">
     <div class="field">
-      <label>Audio Bitrate</label>
+      <label for="audio_bitrate_kbps">Audio Bitrate</label>
       <input type="range" id="audio_bitrate_kbps" min="32" max="320" step="8">
       <span class="value" id="audio_bitrate_kbps-val"></span>
     </div>
@@ -584,6 +671,71 @@ const API = '';
 // -- State --
 let options = {};
 let currentEncoder = {};
+
+// -- Bridge status (polled) --
+function fmtUptime(s) {
+  if (s < 60) return Math.floor(s) + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+  return Math.floor(s / 86400) + 'd ' + Math.floor((s % 86400) / 3600) + 'h';
+}
+
+function renderStatus(st) {
+  const badge = document.getElementById('bridge-badge');
+  if (!st.encoder_alive) {
+    badge.textContent = 'encoder down';
+    badge.className = 'badge down';
+  } else if (st.state === 'streaming') {
+    badge.textContent = 'streaming';
+    badge.className = 'badge live';
+  } else {
+    badge.textContent = 'idle';
+    badge.className = 'badge';
+  }
+
+  let last = '—';
+  if (st.last_clip) {
+    const ago = fmtUptime(Date.now() / 1000 - st.last_clip.finished_at);
+    last = st.last_clip.name + ' (' + st.last_clip.frames + ' frames, ' + ago + ' ago)';
+  }
+  const items = [
+    ['Now Playing', st.current_file || '—'],
+    ['Queue', st.queue_depth + (st.queue_depth === 1 ? ' clip' : ' clips') + ' waiting'],
+    ['Last Clip', last],
+    ['Bridge Uptime', fmtUptime(st.uptime_seconds)],
+  ];
+  document.getElementById('status-grid').innerHTML = items.map(([label, val]) =>
+    '<div class="info-item"><span class="label">' + label + '</span><br><span class="val">' + val + '</span></div>'
+  ).join('');
+}
+
+async function pollStatus() {
+  try {
+    const st = await fetch(API + '/api/status').then(r => r.json());
+    renderStatus(st);
+  } catch (e) {
+    const badge = document.getElementById('bridge-badge');
+    badge.textContent = 'unreachable';
+    badge.className = 'badge down';
+  }
+}
+setInterval(pollStatus, 2000);
+
+// -- Live preview (MediaMTX HLS player, loaded on demand) --
+function togglePreview() {
+  const wrap = document.getElementById('preview-wrap');
+  const frame = document.getElementById('preview-frame');
+  const btn = document.getElementById('preview-btn');
+  if (wrap.classList.contains('hidden')) {
+    frame.src = 'http://' + location.hostname + ':8889/camera';
+    wrap.classList.remove('hidden');
+    btn.textContent = 'Hide Preview';
+  } else {
+    frame.src = '';
+    wrap.classList.add('hidden');
+    btn.textContent = 'Load Preview';
+  }
+}
 
 // -- Realtime streaming --
 function loadStreaming(rt) {
@@ -664,6 +816,7 @@ async function init() {
     loadStreaming(rtRes);
     setStatus('ok', 'Connected — version ' + encRes.version);
     setRtStatus('ok', 'Connected');
+    pollStatus();
   } catch (e) {
     setStatus('error', 'Failed to connect: ' + e.message);
     setRtStatus('error', 'Failed to connect: ' + e.message);
@@ -699,6 +852,42 @@ function renderConfig(cfg) {
   grid.innerHTML = items.map(([label, val]) =>
     '<div class="info-item"><span class="label">' + label + '</span><br><span class="val">' + val + '</span></div>'
   ).join('');
+  renderFtp(cfg.ftp);
+}
+
+// -- Camera FTP setup card --
+let ftpPassword = '';
+let ftpPassVisible = false;
+
+function renderFtp(ftp) {
+  if (!ftp || !ftp.configured) return;  // env not passed through — keep card hidden
+  document.getElementById('ftp-card').classList.remove('hidden');
+  ftpPassword = ftp.password || '';
+
+  // FTP_PUBLIC_HOST is what passive mode advertises; if unset, the address
+  // you loaded this page from is the best guess
+  const host = ftp.host || location.hostname;
+  const hostNote = ftp.host ? ''
+    : '<br><span class="label">(guessed from this page\\u2019s address \\u2014 set FTP_PUBLIC_HOST in .env)</span>';
+
+  const items = [
+    ['FTP Server', host + hostNote],
+    ['Port', ftp.port],
+    ['Username', ftp.user],
+  ];
+  document.getElementById('ftp-grid').innerHTML = items.map(([label, val]) =>
+    '<div class="info-item"><span class="label">' + label + '</span><br><span class="val">' + val + '</span></div>'
+  ).join('') +
+    '<div class="info-item"><span class="label">Password</span><br>' +
+    '<span class="val" id="ftp-pass-val">\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022</span> ' +
+    '<button class="reveal-btn" id="ftp-pass-btn" onclick="toggleFtpPass()" aria-label="Show FTP password">show</button></div>';
+}
+
+function toggleFtpPass() {
+  ftpPassVisible = !ftpPassVisible;
+  document.getElementById('ftp-pass-val').textContent =
+    ftpPassVisible ? ftpPassword : '\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022';
+  document.getElementById('ftp-pass-btn').textContent = ftpPassVisible ? 'hide' : 'show';
 }
 
 function loadEncoder(enc) {
